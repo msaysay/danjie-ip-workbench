@@ -1,0 +1,17 @@
+{
+  "release": "1.0.0",
+  "private_data_included": false,
+  "teacher_data_markers_found": 0,
+  "text_files_checked_including_nested_skill_archives": 437,
+  "runtime_data_files": 0,
+  "framework_verification": {
+    "original_framework_files": 104,
+    "original_frameworks": 12,
+    "original_13_packages": 12,
+    "all_original_hashes_match": true,
+    "windows_09_fix": "单独兼容副本仅用UTF-8字节写入，原包和校验规则保留。"
+  },
+  "windows_clean_install": "passed",
+  "mac_archives": "Apple Silicon and Intel archives verified; not Mac runtime-tested",
+  "optional_connections": "No accounts, keys, sessions, or results; install/login separately."
+}

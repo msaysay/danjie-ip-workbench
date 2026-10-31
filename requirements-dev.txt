@@ -1,0 +1,2 @@
+-r assets/workbench/requirements-core.lock.txt
+httpx>=0.28,<1

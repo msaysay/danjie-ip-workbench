@@ -1,0 +1,34 @@
+# Per-installation state and credentials
+**/data/
+**/.runtime/
+**/.venv/
+**/__pycache__/
+**/*.egg-info/
+**/.pytest_cache/
+**/node_modules/
+**/dist/
+**/cookies/
+**/browser-profile/
+**/.env
+**/.env.*
+!**/.env.example
+*.pyc
+*.log
+*.pid
+*.sqlite*
+*.db
+*.dpapi
+*.pem
+*.key
+# Downloaded portable dependencies and generated distribution packages
+/assets/runtimes/
+/assets/wheels/
+/artifacts/
+/build/
+/test-results/
+# Expanded immutable course archives; source of truth is frameworks.zip
+/assets/workbench/frozen-skills-v041/
+/assets/workbench/runtime-fixes/
+/assets/workbench/reference/
+.DS_Store
+Thumbs.db
