@@ -45,8 +45,8 @@ def attach(app,core):
   return result
  @app.get('/api/methods/ai-instructions')
  def ai_instructions():
-  p,m=active();helper=str(core.ROOT/'workbuddy_publish_method.py');manifest={'profile_id':p['id'],'owner':m['owner'],'business':m['business'],'mode':m['mode'],'module':'三圈选题','topic':'共用资料','source_dir':'本次原版Skill实际结果目录','files':['实际HTML文件名','实际交接JSON文件名']}
-  prompt='请把我已经做好的蛋蛋成果接回本机工作台，不重新采访。先核对同一人物、同一业务和资料性质，优先用原版Skill导出的HTML和交接JSON；原件与旧版保留。如果已有13号总装项目，直接读取project.json中登记的公开成果，按模块接回，不要求我重新找文件，也不读取runtime私有采访状态。逐项接回三圈选题、开头、支撑、绝活、收尾、人设、简介、乾坤连线、一题多讲和故事等实际已有成果。不要把安装包、密钥、Cookie或私有采访状态上传。\n\n每次只在本次结果目录里写一个接回清单，按实际成果修改module、topic、source_dir和files，不用学员填JSON：\n'+json.dumps(manifest,ensure_ascii=False,indent=2)+'\n\n然后使用本机已有Python执行：\npython "'+helper+'" --manifest "本次接回清单.json"\n\n读取返回并在“蛋解方法”页核对入口。没有生成的成果如实留缺口，不用其他人的演示或静态图冒充交互成品。导入不代表本人确认选题；留给本人在页面点“就写这题”。只接回文件，不自动发布或投流。'
+  p,m=active();helper=str(core.ROOT/'workbuddy_publish_method.py');alias=str(core.ROOT.parents[1]/'scripts'/'publish_method.py');manifest={'profile_id':p['id'],'owner':m['owner'],'business':m['business'],'mode':m['mode'],'module':'三圈选题','topic':'共用资料','source_dir':'本次原版Skill实际结果目录','files':['实际HTML文件名','实际交接JSON文件名']}
+  prompt='请把我已经做好的蛋蛋成果接回本机工作台，不重新采访。你是 WorkBuddy 或 Codex 时都按这一条做。先核对同一人物、同一业务和资料性质，优先用原版Skill导出的HTML和交接JSON；原件与旧版保留。如果已有13号总装项目，直接读取project.json中登记的公开成果，按模块接回，不要求我重新找文件，也不读取runtime私有采访状态。逐项接回三圈选题、开头、支撑、绝活、收尾、人设、简介、乾坤连线、一题多讲和故事等实际已有成果。不要把安装包、密钥、Cookie或私有采访状态上传。\n\n每次只在本次结果目录里写一个接回清单，按实际成果修改module、topic、source_dir和files，不用学员填JSON：\n'+json.dumps(manifest,ensure_ascii=False,indent=2)+'\n\n然后使用本机已有Python执行下面任意一条：\npython "'+helper+'" --manifest "本次接回清单.json"\npython "'+alias+'" --manifest "本次接回清单.json"\n\n读取返回并在“蛋解方法”页核对入口。没有生成的成果如实留缺口，不用其他人的演示或静态图冒充交互成品。导入不代表本人确认选题；留给本人在页面点“就写这题”。只接回文件，不自动发布或投流。'
   return {'profile_id':p['id'],'text':prompt}
  def checked_selection(d):
   p,m=active(d.get('profile_id'));_,_,a,_=asset(str(d.get('asset_id','')),d.get('asset_sha'));title=str(d.get('title','')).strip()
@@ -135,5 +135,6 @@ def attach(app,core):
   with core.LOCK:
    if core.get('project',p['id'])['revision']!=p['revision']:raise HTTPException(409,'已有成果刚有变化，请重新接入，旧版保留')
    if count:core.patch('project',p['id'],{'sources':[memory if x.get('kind')=='business_memory' else x for x in p['sources']]})
+  if count and any(x.get('profile_id')==p['id'] for x in core.listing('business_chat_link')) and callable(getattr(core,'refresh_business_folder',None)):core.refresh_business_folder()
   return {'imported':count,'profile_id':p['id'],'note':'已接回成果，旧版保留；文件里的确认标记不会替本人确认选题或脚本。'}
  return {'library':library,'read_asset':read_asset}

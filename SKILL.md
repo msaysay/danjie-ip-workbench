@@ -25,11 +25,13 @@ description: 安装并使用蛋解老板IP工作台，沿用本人的蛋蛋作�
 
 ## 做完直接接回
 
-使用同一本机工作台的`/api/methods/ai-instructions`取得当前业务的接回说明；端口以`assets/workbench/data/service.json`为准。按实际输出写清单，由AI执行`assets/workbench/workbuddy_publish_method.py --manifest 本次清单`，不让学员填写JSON。只接明确输出文件，保留旧版。原版13项目只读其登记的公开成品，不读runtime采访私有状态。
+WorkBuddy 与 Codex 使用同一条接回。Codex 从仓库根目录的 `AGENTS.md` 进入；下面的命令两边相同。
+
+使用同一本机工作台的`/api/methods/ai-instructions`取得当前业务的接回说明；端口以`assets/workbench/data/service.json`为准。按实际输出写清单，由AI执行`assets/workbench/workbuddy_publish_method.py --manifest 本次清单`，或执行等价的`scripts/publish_method.py --manifest 本次清单`。不让学员填写JSON。只接明确输出文件，保留旧版。原版13项目只读其登记的公开成品，不读runtime采访私有状态。
 
 确认选题后按蛋蛋框架写完整自然口播：03或07开头→04一条贴题主路线→05已有实力/真实身份→06一个收尾。不是把四张卡拼贴，不用学员重复选择全部方法。无真实证据只讲核对办法/明确假设，不编成绩、故事或研究；对比先在内部草稿做，未经核对的版本不交给真实客户试错。服务与公开入口未确认，就不加报名、私信领取或效果保证。
 
-执行`/api/experience/business/prepare`，读取它返回的本业务共有目录，按其中最新“写稿时沿用的方法.md”“当前作业版本.json”“选题回传格式.md”保存完整稿到“今日选题.json”；调用sync并读回。写完在方法页自己点题，接到选题脚本页审核；文件或默认高亮不是本人确认。初稿仍待审，不能标ready或自动发布。
+每次写稿前都执行`/api/experience/business/prepare`。它会按当前作业刷新共有目录，不要沿用准备之前的旧格式。读取它返回的本业务共有目录，按其中最新“写稿时沿用的方法.md”“当前作业版本.json”“选题回传格式.md”保存完整稿到“今日选题.json”。`generated_by` 填写实际宿主，不要求写成 WorkBuddy。`source_shas` 只引用本题上下文里的作业。然后调用 sync 并读回。写完在方法页自己点题，接到选题脚本页审核；文件或默认高亮不是本人确认。初稿仍待审，不能标ready或自动发布。
 
 ## 持续记忆与其他功能
 
