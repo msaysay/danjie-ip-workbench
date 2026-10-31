@@ -1,4 +1,5 @@
 import sys,json,hashlib,subprocess,tempfile,unittest
+from datetime import datetime,timezone,timedelta
 from pathlib import Path
 from fastapi.testclient import TestClient
 APP=Path(__file__).resolve().parents[1];sys.path.insert(0,str(APP))
@@ -49,4 +50,39 @@ class SourceWorkbenchTests(unittest.TestCase):
   self.post('/methods/artifacts',packet);asset=s.get('project','p')['sources'][0]['assets'][0]
   selected=self.post('/methods/confirm-topic',{'profile_id':'p','asset_id':asset['id'],'asset_sha':asset['sha256'],'title':'本次虚构任务应该先核对哪项材料？','state':{}}).json()
   topic=s.get('writing_topic',selected['topic_id']);self.assertEqual(topic['stage'],'topic');self.assertEqual(topic['script'],'');self.assertFalse(s.listing('batch'))
+ def test_prepare_exports_homework_and_codex_script_roundtrip_stays_unconfirmed(self):
+  self.profile();first=self.post('/experience/business/prepare',{});self.assertEqual(first.status_code,200)
+  folder=s.project_dir('p')/'workbuddy-business';fmt=(folder/'选题回传格式.md').read_text(encoding='utf-8')
+  self.assertIn('prepared_script',fmt);self.assertIn('writing_material_version',fmt);self.assertNotIn('仅给WorkBuddy看',fmt)
+  self.assertTrue((folder/'宿主AI维护说明.md').is_file());self.assertIn('Codex',(folder/'宿主AI维护说明.md').read_text(encoding='utf-8'))
+  text=json.dumps({'mode':'fictional_demo','topics':[{'question':'本次虚构任务应该先核对哪项材料？'}]},ensure_ascii=False)
+  packet={'profile_id':'p','owner':'测试学员','business':'独立虚构业务','mode':'fictional_demo','module':'三圈选题','topic':'共用资料','files':[{'name':'topics.json','encoding':'text','content':text,'sha256':hashlib.sha256(text.encode()).hexdigest()}]}
+  self.assertEqual(self.post('/methods/artifacts',packet).json()['imported'],1)
+  self.assertEqual(self.post('/experience/business/prepare',{}).status_code,200)
+  exported=next(p for p in folder.iterdir() if p.is_file() and hashlib.sha256(p.read_bytes()).hexdigest()==packet['files'][0]['sha256'])
+  self.assertEqual(exported.read_text(encoding='utf-8'),text)
+  version=json.loads((folder/'当前作业版本.json').read_text(encoding='utf-8'))
+  self.assertEqual([x['sha256'] for x in version['sources']],[packet['files'][0]['sha256']])
+  self.assertFalse(list(folder.glob('选题回传格式-外部修改保留-*')))
+  title='本次虚构任务应该先核对哪项材料？'
+  opening='先别按别人的结论开口。这次虚构任务要问的是，哪一项材料必须先核对，才不会把演练写成已经发生的事。'
+  reason='核对方法只有一条：对照本次已经接回的选题原句，缺的材料就标成还不知道。这里没有实测数字，也不能说已经研究证明。'
+  identity='我是这次课堂演练里的测试学员，只说明自己在核对材料，没有可公开的成绩。'
+  ending='看完先做一件事：把还没接回的材料留空，不要补成客户原话。'
+  script='\n\n'.join([opening,reason,identity,ending]);self.assertGreaterEqual(len(script),80)
+  topic={'title':title,'audience':'虚构测试里的学员本人','reason':'对应这份虚构选题里唯一的核对问题','needs':[1],'framework':[{'key':'opening','label':'开头','skill':'07','text':opening},{'key':'reason','label':'支撑','skill':'04','text':reason},{'key':'identity','label':'身份','skill':'05','text':identity},{'key':'ending','label':'收尾','skill':'06','text':ending}],'prepared_script':{'script':script,'parts':[{'key':'opening','text':opening},{'key':'reason','text':reason},{'key':'identity','text':identity},{'key':'ending','text':ending}],'plan':{'opening_method':'追魂一问','proof_method':'有对比','proof_state':'method_only','muscle_state':'identity_only','muscle_gaps':['没有成绩数字'],'ending_method':'留动作','source_shas':[packet['files'][0]['sha256']],'public_entry_quotes':[]},'generated_by':'Codex'}}
+  payload={'profile_id':'p','mode':'fictional_demo','writing_material_version':version['writing_material_version'],'date':datetime.now(timezone(timedelta(hours=8))).date().isoformat(),'topics':[topic]}
+  (folder/'今日选题.json').write_text(json.dumps(payload,ensure_ascii=False),encoding='utf-8')
+  synced=self.post('/experience/business/sync',{});self.assertEqual(synced.status_code,200);self.assertEqual(synced.json()['errors'],[])
+  saved=next(t for t in s.listing('writing_topic') if t['title']==title)
+  self.assertEqual(saved['prepared_script']['generated_by'],'Codex');self.assertEqual(saved['stage'],'topic');self.assertEqual(saved['script'],'')
+  drafted=self.post('/workflow/topics/'+saved['id']+'/draft',{'expected_revision':saved['revision']});self.assertEqual(drafted.status_code,200)
+  self.assertEqual(drafted.json()['stage'],'script');self.assertIn(opening,drafted.json()['script']);self.assertNotEqual(drafted.json()['stage'],'ready')
+  edited=drafted.json()['script']+'\n\n这句话是学员在页面上改的，仍是虚构。'
+  reviewed=self.post('/workflow/topics/'+saved['id']+'/review',{'action':'script','script':edited,'note':'把结尾说得更口语','finish':False,'expected_revision':drafted.json()['revision']})
+  self.assertEqual(reviewed.status_code,200);self.assertEqual(reviewed.json()['stage'],'script');self.assertEqual(s.get('writing_topic',saved['id'])['script'],edited)
+  topic['prepared_script']['plan']['source_shas']=['0'*64]
+  (folder/'今日选题.json').write_text(json.dumps(payload,ensure_ascii=False),encoding='utf-8')
+  rejected=self.post('/experience/business/sync',{});self.assertEqual(rejected.status_code,200);self.assertTrue(rejected.json()['errors']);self.assertIn('sha256',rejected.json()['errors'][0])
+  self.assertEqual(s.get('writing_topic',saved['id'])['script'],edited);self.assertEqual(s.get('writing_topic',saved['id'])['stage'],'script');self.assertFalse(s.listing('batch'))
 if __name__=='__main__':unittest.main()

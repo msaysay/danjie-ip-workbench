@@ -13,6 +13,7 @@
 | `assets/frameworks.zip` | 12项原版冻结框架、09兼容副本、原13总装与其原包 |
 | `assets/workbench/vendor/` | 独立发布与数据模块的源码及许可 |
 | `SKILL.md`、`references/` | WorkBuddy入口与操作流程 |
+| `AGENTS.md` | Codex入口；与WorkBuddy共用同一条作业接回、选题和写稿 |
 | `scripts/` | 本地开发、便携启动、依赖准备与业务初始化 |
 
 框架ZIP是课程原件，不是使用后备份。展开的框架目录不重复纳入Git；需要修改方法时应单独保存新版本与来源，不覆盖原冻结包。不要把学员的data文件夹或已登录浏览器目录提交到这个仓库。
