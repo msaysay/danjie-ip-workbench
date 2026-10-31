@@ -19,6 +19,10 @@ from utils.login_qrcode import decode_qrcode_from_path
 from utils.login_qrcode import print_terminal_qrcode
 from utils.login_qrcode import remove_qrcode_file
 from utils.login_qrcode import save_data_url_image
+from uploader.publish_guards import apply_original_claim as claim_original
+from uploader.publish_guards import clear_douyin_location
+from uploader.publish_guards import control_checked
+from uploader.publish_guards import declaration_visible
 from utils.log import douyin_logger
 
 DOUYIN_PUBLISH_STRATEGY_IMMEDIATE = "immediate"
@@ -396,7 +400,10 @@ class DouYinBaseUploader(BaseVideoUploader):
         await page.keyboard.press("Escape")  # 收起话题下拉，避免浮层拦截后续点击
 
     async def set_location(self, page: Page, location: str = ""):
+        # 没有明确地点时清掉表单上残留或自动填上的位置，不靠浏览器定位。
+        location = (location or "").strip()
         if not location:
+            await clear_douyin_location(page)
             return
         await page.locator('div.semi-select span:has-text("输入地理位置")').click()
         await page.keyboard.press("Backspace")
@@ -404,6 +411,9 @@ class DouYinBaseUploader(BaseVideoUploader):
         await page.keyboard.type(location)
         await page.wait_for_selector('div[role="listbox"] [role="option"]', timeout=5000)
         await page.locator('div[role="listbox"] [role="option"]').first.click()
+        chosen = page.locator("div.semi-select").filter(has_text=location).first
+        if not await chosen.count():
+            raise RuntimeError(f"抖音位置没有写成「{location}」，已停止发布")
 
     async def handle_product_dialog(self, page: Page, product_title: str):
         await page.wait_for_timeout(2000)
@@ -519,7 +529,7 @@ class DouYinBaseUploader(BaseVideoUploader):
             if await dialog.count() == 0:
                 dialog = page.locator(".semi-modal-body").filter(has_text="请选择声明类型").first
             if await dialog.count() == 0:
-                douyin_logger.warning(_msg("🧾", "自主声明弹窗未打开，跳过声明继续发布"))
+                douyin_logger.warning(_msg("🧾", "自主声明弹窗未打开，不能确认已选中"))
                 return False
             await dialog.first.wait_for(state="visible", timeout=6000)
 
@@ -529,14 +539,33 @@ class DouYinBaseUploader(BaseVideoUploader):
             ).first
             if await option.count() == 0:
                 option = dialog.locator("label.semi-radio").filter(has_text=declaration).first
-            if await option.count():
-                try:
-                    await option.click(timeout=6000)
-                except Exception:
-                    await _native_click(page, option)
-            else:
-                await dialog.get_by_text(declaration, exact=True).first.click(timeout=6000, force=True)
+            if await option.count() == 0:
+                option = dialog.get_by_text(declaration, exact=True).first
+            try:
+                await option.click(timeout=6000)
+            except Exception:
+                await _native_click(page, option)
             await page.wait_for_timeout(400)
+            if not await control_checked(option):
+                try:
+                    await option.evaluate(
+                        """el => {
+                            const input = el.querySelector('input');
+                            const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'checked')?.set;
+                            if (input && setter) {
+                                setter.call(input, true);
+                                input.dispatchEvent(new Event('input', {bubbles: true}));
+                                input.dispatchEvent(new Event('change', {bubbles: true}));
+                            }
+                            el.click();
+                        }"""
+                    )
+                except Exception:
+                    pass
+                await page.wait_for_timeout(300)
+            if not await control_checked(option):
+                douyin_logger.warning(_msg("🧾", f"自主声明「{declaration}」点了但没有选中"))
+                return False
 
             # 确定：footer 的 primary 按钮
             confirm_btn = dialog.locator("button.semi-button-primary").filter(has_text="确定").first
@@ -552,10 +581,13 @@ class DouYinBaseUploader(BaseVideoUploader):
                 await dialog.first.wait_for(state="hidden", timeout=6000)
             except Exception:
                 pass
+            if not await declaration_visible(page, declaration):
+                douyin_logger.warning(_msg("🧾", f"自主声明「{declaration}」确定后页面上没有显示"))
+                return False
             douyin_logger.success(_msg("🧾", f"自主声明已选择「{declaration}」"))
             return True
         except Exception as exc:
-            douyin_logger.warning(_msg("🧾", f"自主声明设置失败，跳过该步骤继续发布：{exc}"))
+            douyin_logger.warning(_msg("🧾", f"自主声明「{declaration}」未能确认选中：{exc}"))
             return False
 
     async def select_bgm(self, page: Page, bgm_name: str) -> bool:
@@ -643,6 +675,7 @@ class DouYinVideo(DouYinBaseUploader):
         debug: bool = DEBUG_MODE,
         headless: bool = LOCAL_CHROME_HEADLESS,
         declaration: str | None = None,
+        location: str | None = None,
     ):
         super().__init__(
             publish_date=publish_date,
@@ -661,12 +694,19 @@ class DouYinVideo(DouYinBaseUploader):
         self.desc = desc or ""
         self.collection_name = collection_name
         self.declaration = declaration.strip() if declaration and declaration.strip() else None
+        self.location = (location or "").strip()
 
     async def apply_self_declaration(self, page: Page) -> None:
-        if not self.declaration:
-            return
-        if not await self.set_self_declaration(page, self.declaration):
-            raise RuntimeError(f"自主声明「{self.declaration}」设置失败，拒绝继续发布")
+        # 每条视频都标明「内容由AI生成」。传入其他声明也不改这条规则。
+        self.declaration = "内容由AI生成"
+        for _ in range(3):
+            if await self.set_self_declaration(page, self.declaration):
+                return
+            await page.wait_for_timeout(600)
+        raise RuntimeError(f"自主声明「{self.declaration}」没有选中，已停止发布")
+
+    async def apply_original_claim(self, page: Page) -> None:
+        await claim_original(page, platform_name="抖音")
 
     async def _clear_blocking_overlays(self, page: Page) -> None:
         """清除会拦截点击的浮层：填完话题后残留的话题/@提及下拉(publish-mention-wrapper)
@@ -974,9 +1014,10 @@ class DouYinVideo(DouYinBaseUploader):
         douyin_logger.info(_msg("🥳", "上传前检查通过"))
 
         browser = await playwright.chromium.launch(headless=self.headless, channel="chromium", args=["--no-sandbox", "--disable-blink-features=AutomationControlled"])
+        # 不授予定位。未填写地点时，授权定位会让发布页自动带上一个城市。
         context = await browser.new_context(
             storage_state=f"{self.account_file}",
-            permissions=["geolocation"],
+            permissions=[],
         )
         context = await set_init_script(context)
 
@@ -1046,11 +1087,9 @@ class DouYinVideo(DouYinBaseUploader):
             await self.set_product_link(page, self.productLink, self.productTitle)
             douyin_logger.info(_msg("🥳", "商品链接设置完成"))
 
-        # 自主声明：本项目成片含 AI 生成内容（TTS 配音 / AI 字幕 / AI 前贴片），
-        # 按平台合规如实选「内容由AI生成」（与转载等并列，单选，无二级选项、无需填来源）。
-        if not self.declaration:
-            self.declaration = "内容由AI生成"
+        # 自主声明与原创是两项。每条视频都选「内容由AI生成」，并勾上「声明原创」。
         await self.apply_self_declaration(page)
+        await self.apply_original_claim(page)
 
         # 先归集：此时尚未打开封面弹窗，避免 dy-creator-content-portal 封面浮层拦截合集下拉
         # （实测：封面弹窗在 headless 下常滞留"检测中"未关闭，会盖住"添加合集"下拉）
@@ -1066,6 +1105,8 @@ class DouYinVideo(DouYinBaseUploader):
 
         if self.publish_strategy == DOUYIN_PUBLISH_STRATEGY_SCHEDULED and self.publish_date != 0:
             await self.set_schedule_time_douyin(page, self.publish_date)
+
+        await self.set_location(page, self.location)
 
         sms_prompt_logged = False
         while True:
@@ -1212,6 +1253,8 @@ class DouYinNote(DouYinBaseUploader):
         if self.publish_strategy == DOUYIN_PUBLISH_STRATEGY_SCHEDULED and self.publish_date != 0:
             await self.set_schedule_time_douyin(page, self.publish_date)
 
+        await clear_douyin_location(page, required=False)
+
         while True:
             try:
                 publish_button = page.get_by_role("button", name="发布", exact=True)
@@ -1235,7 +1278,7 @@ class DouYinNote(DouYinBaseUploader):
         browser = await playwright.chromium.launch(headless=self.headless, channel="chromium", args=["--no-sandbox", "--disable-blink-features=AutomationControlled"])
         context = await browser.new_context(
             storage_state=f"{self.account_file}",
-            permissions=["geolocation"],
+            permissions=[],
         )
         context = await set_init_script(context)
 

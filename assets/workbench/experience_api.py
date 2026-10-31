@@ -389,5 +389,18 @@ def attach(app,core):
     core.patch('project',ident,{'platform_copy':copy,'cover_studio':manifest,'publish_preparation':{**(p.get('publish_preparation')or{}),'cover_state':'video_frame','cover_design':manifest,'selected_frame':{'file':manifest['selected_frame'],'at':at}}})
    return {'message':f'已用本片第{at:.1f}秒的画面制作横竖封面，两平台均可使用。','manifest':manifest}
   return await run_in_threadpool(work)
+ @app.post('/api/projects/{ident}/covers/clear')
+ async def clear_covers(ident:str,r:Request):
+  d=await r.json()
+  def work():
+   p=core.get('project',ident)
+   if p['revision']!=d.get('expected_revision'):raise HTTPException(409,'视频资料有新修改，请核对后再去掉封面')
+   copy=json.loads(json.dumps(p.get('platform_copy') or {}))
+   for platform in ['douyin','tencent']:
+    row=dict(copy.get(platform) or {}); row.pop('cover',None); row.pop('cover_landscape',None); copy[platform]=row
+   prep=dict(p.get('publish_preparation') or {}); prep['cover_state']='cleared'
+   core.patch('project',ident,{'platform_copy':copy,'publish_preparation':prep,'cover_studio':None})
+   return {'message':'已去掉自定义封面。这次发布计划不会自动截帧，平台会自己挑一帧。'}
+  return await run_in_threadpool(work)
  core.refresh_business_folder=business_prepare
  return {'review':review,'business':business,'sync_business':sync_business}

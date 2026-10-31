@@ -46,6 +46,11 @@ def register(platform_parsers):
     tencent_upload_video_parser.add_argument("--category", help="Optional original content category")
     tencent_upload_video_parser.add_argument("--draft", action="store_true", help="Save as draft instead of publishing")
     tencent_upload_video_parser.add_argument("--collection", default=None, help="Optional collection name to add the work into (must already exist)")
+    tencent_upload_video_parser.add_argument(
+        "--location",
+        default="",
+        help="Only set a place when this is non-empty. Empty clears any suggested place",
+    )
     add_runtime_flags(tencent_upload_video_parser)
 
 
@@ -67,6 +72,7 @@ class TencentVideoUploadRequest:
     debug: bool = True
     headless: bool = True
     collection_name: str | None = None
+    location: str = ""
 
 
 async def login_tencent_account(account_name: str, headless: bool = True) -> dict:
@@ -111,6 +117,7 @@ async def upload_tencent_video(request: TencentVideoUploadRequest) -> Path:
         debug=request.debug,
         headless=request.headless,
         collection_name=request.collection_name,
+        location=request.location,
     )
     await app.tencent_upload_video()
     return account_file
@@ -150,6 +157,7 @@ async def run(args):
             debug=args.debug,
             headless=args.headless,
             collection_name=args.collection,
+            location=args.location,
         )
         await upload_tencent_video(request)
         print(f"Tencent/WeChat Channels video upload submitted: {request.video_file}")
