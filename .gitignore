@@ -9,6 +9,7 @@
 **/dist/
 **/cookies/
 **/browser-profile/
+/assets/workbench/vendor/social-auto-upload/conf.py
 **/.env
 **/.env.*
 !**/.env.example

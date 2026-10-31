@@ -36,6 +36,13 @@ class SourceWorkbenchTests(unittest.TestCase):
  def test_another_person_cannot_mix_artifacts_into_active_business(self):
   self.profile();text='<h1>虚构卡片</h1>';packet={'profile_id':'p','owner':'其他人','business':'独立虚构业务','mode':'fictional_demo','module':'当头一棒','topic':'共用资料','files':[{'name':'x.html','encoding':'text','content':text,'sha256':hashlib.sha256(text.encode()).hexdigest()}]}
   self.assertEqual(self.post('/methods/artifacts',packet).status_code,409);self.assertFalse(s.get('project','p')['sources'][0]['assets'])
+ def test_release_builder_excludes_generated_publisher_config_and_business_files(self):
+  import importlib.util
+  spec=importlib.util.spec_from_file_location('release_builder_for_test',APP.parents[1]/'scripts/build_release.py');module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+  module.ROOT=Path(self.temp.name)
+  for name in ['assets/workbench/server.py','assets/workbench/vendor/social-auto-upload/conf.example.py','assets/workbench/vendor/social-auto-upload/conf.py','assets/workbench/data/private.json','assets/workbench/vendor/social-auto-upload/cookies/login.json','assets/workbench/vendor/pkg.egg-info/PKG-INFO']:
+   file=module.ROOT/name;file.parent.mkdir(parents=True,exist_ok=True);file.write_text('synthetic test file',encoding='utf-8')
+  allowed={rel.as_posix() for file,rel in module.files()};self.assertEqual(allowed,{'assets/workbench/server.py','assets/workbench/vendor/social-auto-upload/conf.example.py'})
  def test_selected_topic_does_not_approve_or_publish_script(self):
   self.profile();text=json.dumps({'mode':'fictional_demo','topics':[{'question':'本次虚构任务应该先核对哪项材料？'}]},ensure_ascii=False)
   packet={'profile_id':'p','owner':'测试学员','business':'独立虚构业务','mode':'fictional_demo','module':'三圈选题','topic':'共用资料','files':[{'name':'topics.json','encoding':'text','content':text,'sha256':hashlib.sha256(text.encode()).hexdigest()}]}
