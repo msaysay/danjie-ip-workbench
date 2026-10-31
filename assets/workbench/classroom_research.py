@@ -5,7 +5,17 @@ from datetime import datetime,timezone,timedelta
 import requests
 
 REGISTER='https://user.tikhub.io/register?ref=u58I2I4n'
+CONSOLE='https://user.tikhub.io/dashboard/api'
+DOCS='https://docs.tikhub.io'
+GUIDE='https://tikhub.io/zh/getting-started'
+SITE='https://tikhub.io/'
 API='https://api.tikhub.io'
+DEV_PLAIN=b'DANJIE-DEV-PLAINTEXT-v1\n'
+def tikhub_links():return {'register_url':REGISTER,'console_url':CONSOLE,'docs_url':DOCS,'guide_url':GUIDE,'site_url':SITE}
+def storage_info():
+ if __import__('sys').platform=='darwin':return {'storage':'keychain','storage_note':'密钥保存在这台 Mac 的钥匙串里。'}
+ if os.name=='nt':return {'storage':'dpapi','storage_note':'密钥用 Windows 账户保护，只留在这台电脑。'}
+ return {'storage':'dev_plaintext','storage_note':'这台是 Linux，密钥写在本机文件里，只适合开发调试，不要放在学员电脑上。'}
 PLATFORMS={'douyin':'抖音','tencent':'视频号','wechat':'公众号','xiaohongshu':'小红书','kuaishou':'快手','bilibili':'B站','weibo':'微博','zhihu':'知乎'}
 SEARCH_PLATFORMS=set(PLATFORMS)
 HOT_PLATFORMS=['douyin','weibo','kuaishou','bilibili','zhihu']
@@ -40,7 +50,12 @@ def protect(raw,decode=False):
  if __import__('sys').platform=='darwin':
   from platform_secrets import protect_mac
   return protect_mac(raw,decode)
- if os.name!='nt':raise ValueError('此系统尚未配置安全密钥存储，未使用明文代替')
+ if os.name!='nt':
+  # Development machines only. Learner installs are Windows or Mac and use the branches above.
+  if decode:
+   if not raw.startswith(DEV_PLAIN):raise ValueError('这台电脑没有系统密钥保护。开发用的明文记录对不上，请重新连接。')
+   return raw[len(DEV_PLAIN):]
+  return DEV_PLAIN+raw
  source=(ctypes.c_ubyte*len(raw)).from_buffer_copy(raw);inp=Blob(len(raw),source);out=Blob()
  crypt=ctypes.WinDLL('crypt32',use_last_error=True);kernel=ctypes.WinDLL('kernel32',use_last_error=True)
  fn=crypt.CryptUnprotectData if decode else crypt.CryptProtectData
@@ -52,12 +67,13 @@ class TikHub:
  def __init__(self,folder):self.folder=Path(folder);self.folder.mkdir(parents=True,exist_ok=True);self.file=self.folder/'tikhub.dpapi'
  def key(self):return protect(self.file.read_bytes(),True).decode() if self.file.exists() else ''
  def status(self):
+  base={**tikhub_links(),**storage_info()}
   try:key=self.key()
-  except ValueError:return {'configured':False,'needs_reconnect':True,'register_url':REGISTER}
-  return {'configured':bool(key),'suffix':key[-4:] if key else '', 'register_url':REGISTER}
+  except ValueError:return {**base,'configured':False,'needs_reconnect':True}
+  return {**base,'configured':bool(key),'suffix':key[-4:] if key else ''}
  def connect(self,key):
   key=str(key).strip()
-  if len(key)<12 or len(key)>500 or any(c.isspace() for c in key):raise ValueError('请复制TikHub后台的完整API密钥')
+  if len(key)<12 or len(key)>500 or any(c.isspace() for c in key):raise ValueError('请粘贴 TikHub 控制台里的完整密钥，中间不要有空格。')
   self.call('user_info',{},key=key)
   self.file.write_bytes(protect(key.encode()));return self.status()
  def call(self,route,payload,key=None):
@@ -66,19 +82,24 @@ class TikHub:
   method,path=ROUTES[route]
   try:
    response=requests.request(method,API+path,headers={'Authorization':'Bearer '+key},json=payload if method=='POST' else None,params=payload if method=='GET' else None,timeout=65)
-  except requests.RequestException:raise ValueError('TikHub连接暂未返回，请稍后查看；为避免重复扣额度，本次不自动重试') from None
+  except requests.RequestException:raise ValueError('连不上 TikHub。请检查网络后再测一次。为避免重复扣额度，这次不自动重试。') from None
   if not response.ok:
    note=''
    try:
     detail=response.json().get('detail',{})
-    if isinstance(detail,dict) and '不会被扣费' in str(detail.get('message_zh','')):note='；TikHub说明本次不扣费'
+    if isinstance(detail,dict) and '不会被扣费' in str(detail.get('message_zh','')):note='。TikHub 说明这次不扣费'
    except ValueError:pass
-   raise ValueError(f'TikHub接口本次返回HTTP {response.status_code}，未取得内容'+note+'；不会自动重试')
+   code=response.status_code
+   if code==401:raise ValueError('密钥不对或已经失效。请到 TikHub 控制台重新复制完整密钥，再测一次'+note+'。不会自动重试。')
+   if code==402:raise ValueError('TikHub 提示额度不够。请到你的 TikHub 账户查看余额。工作台不代充值'+note+'。不会自动重试。')
+   if code==403:raise ValueError('这个密钥还不能调用。请先在 TikHub 验证邮箱，或检查密钥权限'+note+'。不会自动重试。')
+   if code==429:raise ValueError('请求太频繁，TikHub 暂时拦住了。请稍后再试一次。不会自动重试。')
+   raise ValueError(f'TikHub 这次返回 HTTP {code}，没有取到内容'+note+'。不会自动重试。')
   try:result=json.loads(response.text,parse_int=str)
   except ValueError:raise ValueError('TikHub返回格式无法读取，本次没有导入结果') from None
   if str(result.get('code','200')) not in ['0','200']:raise ValueError('TikHub未返回成功结果，本次没有导入；请检查账户状态')
   if route!='user_info':
-   # Private, encrypted short-lived response cache supports adapter repairs without paying again.
+   # Short-lived response cache supports adapter repairs without paying again. Windows and Mac encrypt it; Linux development machines use the marked plaintext envelope.
    cache=self.folder.parent/'research-cache';cache.mkdir(exist_ok=True)
    ident=hashlib.sha256(json.dumps([route,payload],sort_keys=True,ensure_ascii=False).encode()).hexdigest()[:24]
    raw=json.dumps(result,ensure_ascii=False).replace(key,'[redacted]').encode()

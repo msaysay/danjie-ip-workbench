@@ -25,6 +25,9 @@ INSTANCE = uuid.uuid4().hex
 LOCK = threading.RLock()
 ASR_LOCK = threading.Lock()
 PLATFORMS = {'douyin':'抖音','tencent':'视频号','xiaohongshu':'小红书','bilibili':'B 站','kuaishou':'快手','youtube':'YouTube'}
+# Learner publish accounts are Douyin and WeChat Channels. Xiaohongshu stays a TikHub search source only.
+PUBLISH_PLATFORMS={k:v for k,v in PLATFORMS.items() if k!='xiaohongshu'}
+XHS_PUBLISH_BLOCKED='工作台不提供发布到小红书。小红书只在灵感里查询公开内容。'
 app = FastAPI(title='蛋解老板IP工作台', docs_url=None, redoc_url=None)
 UI_ORIGINS=['http://127.0.0.1:'+os.getenv('WORKBENCH_PORT','8766'),'http://localhost:8766','http://127.0.0.1:5173']
 app.add_middleware(CORSMiddleware,allow_origins=UI_ORIGINS,allow_credentials=False,allow_methods=['GET','POST','PATCH'],allow_headers=['Content-Type','X-Workbench-Token'])
@@ -113,7 +116,7 @@ def local_session():
 def state():
     projects=[{**p,'current_edit_hash':edit_hash(p),'output_current':bool(p.get('output') and (p['output'].get('kind')=='finished_video' or p['output'].get('edit_hash')==edit_hash(p)))} for p in listing('project')]
     return {'token':TOKEN,'instance':INSTANCE,'data_revision':state_revision()['value'],'ideas':listing('idea'),'projects':projects,'feeds':listing('feed'),'accounts':listing('account'),
-            'jobs':listing('job')[:50],'batches':listing('batch'),'metrics':listing('metric'),'platforms':PLATFORMS}
+            'jobs':listing('job')[:50],'batches':listing('batch'),'metrics':listing('metric'),'platforms':PUBLISH_PLATFORMS}
 
 @app.get('/api/revision')
 def state_revision():
@@ -363,9 +366,9 @@ def task_pack(ident:str):
 ## 交付
 1. 主推选题和判断理由，列事实/推断/待核实；不凭标题猜正文。
 2. 符合本人口吻的口播文案，标明待补真实经历。
-3. 抖音、视频号、小红书、B站分别给标题、简介、标签；热搜只引用带日期的真实检索结果。
+3. 抖音、视频号分别给标题、简介、标签；热搜只引用带日期的真实检索结果。
 4. 拍摄/剪辑说明、人工确认点、停止重跑条件。
-5. JSON 结果格式：{{"script":"...","platform_copy":{{"douyin":{{"title":"...","desc":"...","tags":"..."}}}}}}，其他平台键为 tencent/xiaohongshu/bilibili/kuaishou/youtube。可在工作台粘贴回填。
+5. JSON 结果格式：{{"script":"...","platform_copy":{{"douyin":{{"title":"...","desc":"...","tags":"..."}},"tencent":{{"title":"...","desc":"...","tags":"..."}}}}}}。可在工作台粘贴回填。
 
 ## 本机路由
 研究/选题：ai-intel-daily、redfox-content-suite；剪辑：OpenFilm；数字人：ai-video-factory；封面：imagegen；发布：social-auto-upload。只用本任务必要能力。
@@ -391,12 +394,14 @@ def generate_copy(ident:str):
 @app.post('/api/accounts')
 async def account_add(r:Request):
     d=await r.json()
-    if d.get('platform') not in PLATFORMS or not re.fullmatch('[a-zA-Z0-9_-]{1,40}',d.get('alias','')): raise HTTPException(400,'请选择平台，账号别名用英文字母/数字/下划线')
+    if d.get('platform')=='xiaohongshu': raise HTTPException(400,XHS_PUBLISH_BLOCKED)
+    if d.get('platform') not in PUBLISH_PLATFORMS or not re.fullmatch('[a-zA-Z0-9_-]{1,40}',d.get('alias','')): raise HTTPException(400,'请选择平台，账号别名用英文字母/数字/下划线')
     existing=next((a for a in listing('account') if a['platform']==d['platform'] and a['alias']==d['alias']),None)
     return existing or put('account',{'id':uid(),'platform':d['platform'],'alias':d['alias'],'label':d.get('label',d['alias']),'status':'未验证'})
 @app.post('/api/accounts/{ident}/{action}')
 def account_action(ident:str,action:str):
     a=get('account',ident)
+    if a['platform']=='xiaohongshu': raise HTTPException(400,XHS_PUBLISH_BLOCKED)
     if action not in ['login','check']: raise HTTPException(404)
     if not SAUPY.exists(): raise HTTPException(409,'请先安装发布器依赖')
     def work(j):
@@ -431,7 +436,9 @@ def publication_plan(p, accounts):
     elif output.get('edit_hash')!=edit_hash(p): raise HTTPException(409,'素材或剪辑方案已改变，请重新导出成片')
     items=[]
     for aid in accounts:
-        a=get('account',aid);copy=p.get('platform_copy',{}).get(a['platform'],{})
+        a=get('account',aid)
+        if a['platform']=='xiaohongshu': raise HTTPException(400,XHS_PUBLISH_BLOCKED)
+        copy=p.get('platform_copy',{}).get(a['platform'],{})
         title=str(copy.get('title','')).strip();desc=str(copy.get('desc',''));tags=str(copy.get('tags',''))
         if not title: raise HTTPException(400,PLATFORMS[a['platform']]+' 尚未填写标题')
         maxlen={'douyin':30,'tencent':30,'xiaohongshu':20,'bilibili':80,'kuaishou':50,'youtube':100}[a['platform']]
