@@ -15,6 +15,7 @@ from urllib.parse import parse_qs, quote, urlparse
 import requests
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
+from desktop_cli import desktop_cli_location
 
 log = logging.getLogger('danjie.storycue')
 SECRETS = contextvars.ContextVar('storycue_secrets', default=frozenset())
@@ -615,7 +616,12 @@ def attach(app, core):
         ensure_schema(core)
         directory = storycue_directory(core)
         commands = startup_commands(directory or '')
-        payload = {'directory': str(directory or ''), 'tokenReady': False, 'reachable': False, 'setup': None, 'start': commands, 'commands': DESKTOP_COMMANDS, 'message': ''}
+        try:
+            desktop_cli = desktop_cli_location()
+        except Exception:
+            log.info('desktop cli location unavailable')
+            desktop_cli = {'hosts': [], 'npmRoot': '', 'npmError': '这次没能检查本机命令'}
+        payload = {'directory': str(directory or ''), 'tokenReady': False, 'reachable': False, 'setup': None, 'start': commands, 'commands': DESKTOP_COMMANDS, 'desktopCli': desktop_cli, 'message': ''}
         if not directory:
             payload['message'] = '先填写 StoryCue 项目所在目录。工作台只记住这个路径，并在每次请求时读取 bridge-token。'
             return respond(payload)
