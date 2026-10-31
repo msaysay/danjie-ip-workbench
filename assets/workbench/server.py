@@ -582,6 +582,8 @@ from method_api import attach as attach_methods
 METHODS=attach_methods(app,sys.modules[__name__])
 from storycue_api import attach as attach_storycue
 STORYCUE=attach_storycue(app,sys.modules[__name__])
+from writing_host import attach as attach_writing_host
+attach_writing_host(app,sys.modules[__name__])
 
 if (ROOT/'dist').exists():
     app.mount('/assets',StaticFiles(directory=ROOT/'dist'/'assets'),name='assets')
