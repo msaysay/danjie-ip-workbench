@@ -1,0 +1,31 @@
+<!-- 2026-10 视频号助手：昨日数据在外壳，作品在 wujie-app 的 open shadow root。
+     实页用 element.shadowRoot；这里用 template shadowrootmode 表示同一棵树。 -->
+<body>
+  <section class="overview">昨日数据 新增播放 1,280 净增关注 4 新增评论 0</section>
+  <table class="weui-desktop-picker__table">
+    <thead><tr><th>日</th><th>一</th><th>二</th></tr></thead>
+    <tbody><tr><td>1</td><td>2</td><td>3</td></tr></tbody>
+  </table>
+  <wujie-app>
+    <template shadowrootmode="open">
+      <div class="post-feed-item" data-id="export/UzFfBgAAExampleToken">
+        <div class="post-title">老房翻新先看水电</div>
+        <div class="time-label">2026年10月28日 18:20</div>
+        <div class="data-item"><span class="count">1.2万</span><i class="icon outlined-eyes-on"></i></div>
+        <div class="data-item"><span class="count">88</span><i class="icon outlined-like"></i></div>
+        <div class="data-item"><span class="count">3</span><i class="icon outlined-comment"></i></div>
+        <div class="data-item"><span class="count">2</span><i class="icon outlined-share"></i></div>
+        <div class="data-item"><span class="count">9</span><i class="icon outlined-star"></i></div>
+      </div>
+      <div class="post-feed-item">
+        <div>客户问报价怎么回</div>
+        <div>2026年10月20日 09:30</div>
+        <div>560</div>
+        <div>21</div>
+        <div>4</div>
+        <div>1</div>
+        <div>6</div>
+      </div>
+    </template>
+  </wujie-app>
+</body>
