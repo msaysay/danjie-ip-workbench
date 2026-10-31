@@ -131,10 +131,20 @@ def attach(app,core):
      for value in obj.values():yield from walk(value)
     elif isinstance(obj,list):
      for value in obj:yield from walk(value)
-   found={}
-   for row in walk(payload.get('data',payload)):
-    ident=str(row.get('sec_uid') if platform=='douyin' else row.get('user_id') or row.get('userid') or row.get('id') or '' if platform=='xiaohongshu' else row.get('username') or row.get('userName') or row.get('user_name') or '')
-    name=str(row.get('nickname') or row.get('nickName') or row.get('name') or '')
+   found={};root=payload.get('data',payload)
+   # Only walk the returned user list; search filters (e.g. Xiaohongshu "Followers / All") are not accounts.
+   users=next((node[k] for node in walk(root) for k in ['users','user_list'] if isinstance(node.get(k),list)),None) if platform in ['douyin','xiaohongshu'] else None
+   rows=list(walk(users if users is not None else root))
+   if platform in ['tencent','wechat']:
+    # WeChat 搜一搜 account results keep the id in jumpInfo.userName and the display name in the highlighted title.
+    import html as _html,re as _re
+    for item in (root.get('items') if isinstance(root,dict) and isinstance(root.get('items'),list) else []):
+     jump=item.get('jumpInfo') if isinstance(item,dict) and isinstance(item.get('jumpInfo'),dict) else {}
+     if jump.get('userName') and item.get('title'):rows.insert(0,{'username':jump['userName'],'nickname':_html.unescape(_re.sub('<[^>]+>','',str(item['title']))).strip()})
+   for row in rows:
+    sec=row.get('sec_uid') or (row.get('user_id') if str(row.get('user_id','')).startswith('MS4w') else None)
+    ident=str(sec if platform=='douyin' else row.get('user_id') or row.get('userid') or row.get('id') or '' if platform=='xiaohongshu' else row.get('username') or row.get('userName') or row.get('user_name') or '')
+    name=str(row.get('nickname') or row.get('nickName') or row.get('nick_name') or row.get('name') or '')
     if not name or not ident or ident=='None':continue
     if platform=='tencent' and not ident.endswith('@finder'):continue
     if platform=='wechat' and not ident.startswith('gh_'):continue
