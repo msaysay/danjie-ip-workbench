@@ -461,7 +461,7 @@ def publication_plan(p, accounts):
         if schedule:
             try: dt=datetime.strptime(schedule,'%Y-%m-%d %H:%M').replace(tzinfo=timezone(timedelta(hours=8)))
             except ValueError: raise HTTPException(400,'排期格式 YYYY-MM-DD HH:MM，北京时间')
-            if dt<=datetime.now(timezone(timedelta(hours=8)))+timedelta(hours=2): raise HTTPException(400,'排期至少在两小时后')
+            if dt<=datetime.now(timezone(timedelta(hours=8)))+timedelta(hours=2): raise HTTPException(400,'排期至少晚 2 小时')
             args+=['--schedule',schedule]
         delivery_key=digest({'account':aid,'sha':output['sha256'],'title':title,'desc':desc,'tags':tags,'schedule':schedule,'short_title':short_title,'covers':cover_hashes})
         items.append({'account_id':aid,'platform':a['platform'],'alias':a['alias'],'title':title,'desc':desc,'tags':tags,'schedule':schedule,'short_title':short_title,'cover_hashes':cover_hashes,'cover_files':cover_files,'delivery_key':delivery_key,'args':args,'state':'prepared'})
