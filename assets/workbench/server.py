@@ -573,6 +573,8 @@ from experience_api import attach as attach_experience
 EXPERIENCE=attach_experience(app,sys.modules[__name__])
 from method_api import attach as attach_methods
 METHODS=attach_methods(app,sys.modules[__name__])
+from storycue_api import attach as attach_storycue
+STORYCUE=attach_storycue(app,sys.modules[__name__])
 
 if (ROOT/'dist').exists():
     app.mount('/assets',StaticFiles(directory=ROOT/'dist'/'assets'),name='assets')

@@ -21,6 +21,6 @@ python scripts/publish_method.py --manifest 本次接回清单.json
 5. 把今天的题和完整口播写入该目录的 `今日选题.json`。`generated_by` 写 `Codex`，不要写成 WorkBuddy。`source_shas` 只填本题上下文里仍在使用的作业 sha256。`writing_material_version` 必须复制刚读到的值。初稿不要标成已确认，不要自动发布或投流。
 6. `POST /api/experience/business/sync`，读回错误和题目。页面上由学员选题、改稿、保存。保存后的正文在 `从工作台接着用的稿件.md`。
 
-没有配置写作模型时，工作台不会自己编脚本。宿主把稿写进 `今日选题.json` 再同步，就是这条回路的生成步骤。
+没有配置写作模型时，工作台不会自己编脚本。宿主把稿写进 `今日选题.json` 再同步，就是这条回路的生成步骤。初稿不要标成已确认，也不要代替学员打开访谈。
 
-StoryCue 拍摄、sayFrame 剪辑、发布、复盘和 TikHub 不在这条回路里改。失败时保留原文件，看同步返回的具体原因，不放宽校验。
+脚本在页面上确认后，学员可以在选题脚本页交给本机 StoryCue 访谈，或仍下载脚本兜底。访谈前在设置里完成「访谈（StoryCue）」：StoryCue 目录和 bridge-token、`npm run desktop:connect -- --host workbuddy`（Codex 用 `--host codex`）、`npm run desktop:login`、`npm run desktop:doctor`、豆包语音控制台 Key、追问用的文字模型。Key 只经工作台转到 StoryCue 的 `.env.local`。启动 StoryCue 时带 `VOICE_RELAY_PORT=8866`（StoryCue 自己的默认也是 8866）。选题编号须匹配 `^[A-Za-z0-9][A-Za-z0-9_-]{0,80}$`。脚本超过 10 万字或交接包过大时不要硬传，按接口返回的 413 请学员缩短。bridge-token 在 `<StoryCue目录>/.storycue-data/bridge-token`。sayFrame 这次只组装 `danjie.sayframe-handoff.v1`，不剪视频。发布、复盘和 TikHub 不在这条回路里改。失败时保留原文件，看同步返回的具体原因，不放宽校验。
