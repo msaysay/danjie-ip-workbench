@@ -47,10 +47,16 @@ def sync(project,base=BASE):
  labels={1:'客群卡',2:'三圈选题',3:'当头一棒',4:'以理服人',5:'亮出绝活',6:'指条明路',7:'开场八式',8:'人设卡',9:'四行简介',10:'乾坤大挪移',11:'六脉神剑',12:'一题多讲'}
  mime={'.json':'application/json','.md':'text/markdown','.txt':'text/plain','.html':'text/html','.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.pdf':'application/pdf','.docx':'application/vnd.openxmlformats-officedocument.wordprocessingml.document'}
  # Only registered, public reading/handoff artifacts. Private module runtime is not scanned.
+ skipped=[]
  for record in state.get('artifacts',{}).values():
   for role,info in record.get('files',{}).items():
-   path=(root/info['snapshot']).resolve();ext=path.suffix.lower()
-   if not path.is_relative_to(root) or ext not in mime or not path.is_file() or path.stat().st_size>6*1024*1024:continue
+   label_name=Path(str(info.get('source') or info.get('snapshot') or role)).name
+   try:path=(root/info['snapshot']).resolve()
+   except OSError:skipped.append(label_name+'：文件读不到');continue
+   ext=path.suffix.lower()
+   if path.is_symlink() or not path.is_file() or not path.is_relative_to(root):skipped.append(label_name+'：不在本次项目目录里');continue
+   if ext not in mime:skipped.append(label_name+'：这种文件不接回');continue
+   if path.stat().st_size>6*1024*1024:skipped.append(label_name+'：超过 6MB，没有接入');continue
    raw=path.read_bytes();sha=hashlib.sha256(raw).hexdigest()
    if sha!=info['sha256']:raise ValueError('原成果已改变，请按原模块核对后再登记')
    label=labels[record['step']];topic=state.get('topics',{}).get(record.get('topic_id','main'),{}).get('title','共用资料')
@@ -58,6 +64,7 @@ def sync(project,base=BASE):
    name=Path(info.get('source',path.name)).name;encoding='text' if ext in ['.json','.html','.md','.txt'] else 'base64'
    version=1+max([a['version'] for a in memory['assets'] if (a['name'],a['module'],a['topic'])==(name,label,topic)]or[0])
    memory['assets'].append({'id':uuid.uuid4().hex,'name':name,'module':label,'topic':topic,'encoding':encoding,'content':raw.decode('utf-8') if encoding=='text' else base64.b64encode(raw).decode(),'size':len(raw),'sha256':sha,'mime':mime[ext],'version':version,'created_at':datetime.now(timezone.utc).isoformat(),'review':'pending'})
+ if skipped:raise ValueError('有成果没有接入，本机项目和网页都没有改：'+'；'.join(skipped[:8]))
  for feedback in state.get('feedback',[]):
   if not feedback.get('message'):continue
   ident='feedback-'+feedback['id']

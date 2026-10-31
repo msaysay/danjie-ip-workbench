@@ -85,7 +85,7 @@ def attach(app,core):
     old_choices=existing.get('method_choices',[])
     choices=[x for x in old_choices if x.get('module')!=choice['module']]+[choice]
     changes={'method_selected':True,'confirmed':True,'method_choices':choices}
-    prepared=existing.get('prepared_script')
+    prepared=existing.get('prepared_script');rebound=False
     if choices!=old_choices and isinstance(prepared,dict) and prepared.get('material_signature'):
      feedback=[x for x in core.listing('writing_feedback') if x.get('profile_id')==p['id']][:8];refs=[x for x in core.listing('idea') if x.get('profile_id')==p['id']][:8]
      prior_contexts=[request_context(core.ROOT,m,existing,feedback,refs,source_binding=b) for b in [True,False]]
@@ -98,7 +98,11 @@ def attach(app,core):
        updated_context=request_context(core.ROOT,m,{**existing,**changes},feedback,refs)
        changes['prepared_script']=validate_result(prepared,updated_context)
        changes['prepared_binding_note']='同一当前资料、同题且开头与原卡一致；只更新选择来源，保留原生成者。'
-      except ValueError:pass
+       changes['draft_bind_warning']='';rebound=True
+      except ValueError as error:
+       changes['draft_bind_warning']=str(error)
+     if not rebound and 'draft_bind_warning' not in changes:
+      changes['draft_bind_warning']='这次点选和已有预备稿对不上，没有自动套用旧稿。请让 WorkBuddy 或 Codex 按当前选择重写，或在选题脚本里再生成。原稿仍保留。'
     if choices!=old_choices:
      changes['history']=existing.get('history',[])+[{'at':core.now(),'action':'method_choice','note':'已保存这次选题和讲法，写稿沿用本次选择；旧预备稿保留。','before':{'method_choices':old_choices}}]
     core.patch('writing_topic',ident,changes)

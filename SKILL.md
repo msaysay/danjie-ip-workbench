@@ -33,7 +33,7 @@ WorkBuddy 与 Codex 使用同一条接回。Codex 从仓库根目录的 `AGENTS.
 
 每次写稿前都执行`/api/experience/business/prepare`。它会按当前作业刷新共有目录，不要沿用准备之前的旧格式。读取它返回的本业务共有目录，按其中最新“写稿时沿用的方法.md”“当前作业版本.json”“选题回传格式.md”保存完整稿到“今日选题.json”。`generated_by` 填写实际宿主，不要求写成 WorkBuddy。`source_shas` 只引用本题上下文里的作业。然后调用 sync 并读回。写完在方法页自己点题，接到选题脚本页审核；文件或默认高亮不是本人确认。初稿仍待审，不能标ready或自动发布，也不要代替学员把稿交给 StoryCue。
 
-脚本由学员在页面上确认后，选题脚本页可以「交给 StoryCue 访谈」，原来的下载仍作兜底。访谈要先在设置里完成 StoryCue 向导：本机目录与 bridge-token、桌面 AI（`npm run desktop:connect -- --host workbuddy` 或 `--host codex`、`npm run desktop:login`、`npm run desktop:doctor`）、火山引擎语音控制台的豆包语音 Key、追问用的文字模型。Key 只写入 StoryCue 的 `.env.local`。启动时带 `VOICE_RELAY_PORT=8866`（StoryCue 默认也是 8866），避免和本工作台端口冲突。bridge-token 在 StoryCue 目录的 `.storycue-data/bridge-token`。选题编号只能是字母、数字、下划线和连字符。脚本超过 10 万字要先缩短，背景仍压到 1200 字。访谈结果回到该选题。剪辑仍不在本包里做；sayFrame 只预留交接数据。
+脚本由学员在页面上确认后，选题脚本页可以「交给 StoryCue 访谈」，原来的下载仍作兜底。访谈要先在设置里完成 StoryCue 向导：本机目录与 bridge-token、桌面 AI（`npm run desktop:connect -- --host workbuddy` 或 `--host codex`、`npm run desktop:login`、`npm run desktop:doctor`）、火山引擎语音控制台的豆包语音 Key、追问用的文字模型。Key 只写入 StoryCue 的 `.env.local`。启动时带 `VOICE_RELAY_PORT=8866`（StoryCue 默认也是 8866），避免和本工作台端口冲突。bridge-token 在 StoryCue 目录的 `.storycue-data/bridge-token`。选题编号只能是字母、数字、下划线和连字符。脚本超过 10 万字要先缩短，背景仍压到 1200 字。访谈结果回到该选题。不要接 sayFrame，也不要打开工作台里的剪辑。成片由学员在外部剪好，到发布页上传。发布仍要学员自己输入「确认发布」。同步若返回 errors，把原因告诉学员。
 
 ## 持续记忆与其他功能
 
