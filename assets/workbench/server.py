@@ -403,7 +403,7 @@ def account_action(ident:str,action:str):
     a=get('account',ident)
     if a['platform']=='xiaohongshu': raise HTTPException(400,XHS_PUBLISH_BLOCKED)
     if action not in ['login','check']: raise HTTPException(404)
-    if not SAUPY.exists(): raise HTTPException(409,'请先安装发布器依赖')
+    if not publisher_ready(): raise HTTPException(409,'请先安装发布器依赖')
     def work(j):
         args=[SAUPY,SAU/'sau_cli.py',a['platform'],action,'--account',a['alias']]
         if action=='login': args+=['--headed']
@@ -563,10 +563,22 @@ def skill_read(ident:str):
 def templates():
     path=ROOT/'catalog.json'
     return json.loads(path.read_text(encoding='utf-8')) if path.exists() else {'status':'未同步','templates':[]}
+# Import the installed distribution, not sau_cli. sau_cli loads every uploader
+# (and writes vendor log files); /api/health is also fetched with a short timeout
+# while the portable runtime is starting. A venv python left by a refused
+# `pip install -e` does not count.
+PUBLISHER_PROBE='import importlib.metadata, sau_commands; importlib.metadata.version("social-auto-upload")'
+def publisher_ready():
+    if not SAUPY.is_file(): return False
+    try:
+        done=subprocess.run([str(SAUPY),'-I','-c',PUBLISHER_PROBE],cwd=ROOT,capture_output=True,timeout=30,stdin=subprocess.DEVNULL,
+            env={**os.environ,'PYTHONUTF8':'1','PYTHONDONTWRITEBYTECODE':'1'},creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
+    except (OSError,subprocess.TimeoutExpired): return False
+    return done.returncode==0
 @app.get('/api/health')
 def health():
     return {'time':now(),'python':sys.version.split()[0],'ffmpeg':bool(shutil.which('ffmpeg')),'ffprobe':bool(shutil.which('ffprobe')),
-        'openfilm':OPENFILM.exists(),'openfilm_version':'0.2.6','publisher':SAUPY.exists(),
+        'openfilm':OPENFILM.exists(),'openfilm_version':'0.2.6','publisher':publisher_ready(),
         'model_connected':bool(os.getenv('WORKBENCH_MODEL_BASE_URL') and os.getenv('WORKBENCH_MODEL')),
         'accounts_verified':sum(a.get('status')=='已验证' for a in listing('account')),'data_dir':str(DATA),'listen':'127.0.0.1','edit_policy':EDIT_POLICY}
 
