@@ -22,16 +22,28 @@ SECRETS = contextvars.ContextVar('storycue_secrets', default=frozenset())
 MIGRATION = '001_storycue_interview'
 MIGRATION_FILE = Path(__file__).resolve().parent / 'migrations' / f'{MIGRATION}.sql'
 FRAMEWORKS = (
-    ('北极星', '观点破题', '用不同判断开场，以原话和证据讲清道理'),
-    ('四喜', '四维信任', '兼顾破圈、人设、专业与转化'),
-    ('抄近路', '方法直给', '讲清方法步骤，用具体例子帮助理解'),
-    ('消费心理', '痛点解答', '从客户问题讲到答案、依据与下一步'),
-    ('情绪', '情绪共鸣', '从一个真实瞬间和感受切入'),
-    ('业务传记', '人物故事', '用与业务有关的经历、选择和转折建立信任'),
-    ('云参访', '现场探访', '按客户关心的顺序串起可拍的现场'),
-    ('业务硬控', '决策问答', '围绕选择前的疑虑做一问一答'),
+    ('观点破题', '观点破题', '用不同判断开场，以原话和证据讲清道理'),
+    ('四维信任', '四维信任', '兼顾破圈、人设、专业与转化'),
+    ('方法直给', '方法直给', '讲清方法步骤，用具体例子帮助理解'),
+    ('痛点解答', '痛点解答', '从客户问题讲到答案、依据与下一步'),
+    ('情绪共鸣', '情绪共鸣', '从一个真实瞬间和感受切入'),
+    ('人物故事', '人物故事', '用与业务有关的经历、选择和转折建立信任'),
+    ('现场探访', '现场探访', '按客户关心的顺序串起可拍的现场'),
+    ('决策问答', '决策问答', '围绕选择前的疑虑做一问一答'),
 )
 FRAMEWORK_IDS = {row[0] for row in FRAMEWORKS}
+# Inbound aliases only. Responses, labels, and stored handoffs use FRAMEWORK_IDS.
+_LEGACY_FRAMEWORK_IDS = {
+    '北极星': '观点破题',
+    '四喜': '四维信任',
+    '抄近路': '方法直给',
+    '消费心理': '痛点解答',
+    '情绪': '情绪共鸣',
+    '业务传记': '人物故事',
+    '云参访': '现场探访',
+    '业务硬控': '决策问答',
+}
+_CANONICAL_TO_LEGACY = {canonical: legacy for legacy, canonical in _LEGACY_FRAMEWORK_IDS.items()}
 TEST_TARGETS = {'doubao_tts', 'doubao_asr', 'text_llm', 'jev', 'desktop'}
 TOPIC_ID = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_-]{0,80}$')
 MAX_SCRIPT_CHARS = 100_000
@@ -213,6 +225,30 @@ def compress_background(topic, limit=1200):
     return text
 
 
+def canonical_framework(value):
+    text = str(value or '').strip()
+    if text in FRAMEWORK_IDS:
+        return text
+    return _LEGACY_FRAMEWORK_IDS.get(text, '')
+
+
+def storycue_wire_framework(value):
+    """StoryCue's handoff enum still uses the previous ids. Only the outbound payload uses them."""
+    canonical = canonical_framework(value)
+    if not canonical:
+        return ''
+    return _CANONICAL_TO_LEGACY[canonical]
+
+
+def present_interview(interview):
+    if not isinstance(interview, dict):
+        return interview
+    shown = dict(interview)
+    if 'framework' in shown:
+        shown['framework'] = canonical_framework(shown.get('framework'))
+    return shown
+
+
 def suggest_framework(topic):
     parts = {str(part.get('key') or ''): part for part in topic.get('framework') or []}
     opening = parts.get('opening') or {}
@@ -224,32 +260,32 @@ def suggest_framework(topic):
     blob = '\n'.join([opening_text, reason, identity, ending])
     scores = {item[0]: 0 for item in FRAMEWORKS}
     why = {item[0]: [] for item in FRAMEWORKS}
-    scores['北极星'] += 1
-    why['北极星'].append('脚本按开头、支撑、身份、收尾四段写成，默认先按观点破题采访')
+    scores['观点破题'] += 1
+    why['观点破题'].append('脚本按开头、支撑、身份、收尾四段写成，默认先按观点破题采访')
     if '03' in skill or '当头' in skill or '当头' in opening_text[:24]:
-        scores['北极星'] += 3
-        why['北极星'].append('开头是当头一棒这一类判断')
+        scores['观点破题'] += 3
+        why['观点破题'].append('开头是判断式开场')
     if '07' in skill or '开场八式' in skill:
-        scores['四喜'] += 3
-        why['四喜'].append('开头用了开场八式，适合先把信任讲圆')
+        scores['四维信任'] += 3
+        why['四维信任'].append('开头用了多种开场里的一种，适合先把信任讲圆')
     if re.search(r'步骤|第一步|怎么做|具体做法', reason):
-        scores['抄近路'] += 5
-        why['抄近路'].append('支撑段在讲步骤和方法')
+        scores['方法直给'] += 5
+        why['方法直给'].append('支撑段在讲步骤和方法')
     if re.search(r'痛点|卡住|困难|顾虑', blob):
-        scores['消费心理'] += 3
-        why['消费心理'].append('四段里有客户卡住或顾虑')
+        scores['痛点解答'] += 3
+        why['痛点解答'].append('四段里有客户卡住或顾虑')
     if re.search(r'感受|委屈|难过|那一刻|情绪', blob):
-        scores['情绪'] += 4
-        why['情绪'].append('四段里有具体感受')
+        scores['情绪共鸣'] += 4
+        why['情绪共鸣'].append('四段里有具体感受')
     if re.search(r'那年|一开始|转折|我曾经|经历', opening_text + '\n' + identity):
-        scores['业务传记'] += 3
-        why['业务传记'].append('开头或身份段在讲本人经历')
+        scores['人物故事'] += 3
+        why['人物故事'].append('开头或身份段在讲本人经历')
     if re.search(r'现场|到店|镜头|参观|带你看', blob):
-        scores['云参访'] += 5
-        why['云参访'].append('稿里在讲可以拍的现场')
+        scores['现场探访'] += 5
+        why['现场探访'].append('稿里在讲可以拍的现场')
     if re.search(r'为什么找|怎么选|选择前|对比', opening_text + '\n' + ending):
-        scores['业务硬控'] += 3
-        why['业务硬控'].append('开头或收尾在处理选择前的比较')
+        scores['决策问答'] += 3
+        why['决策问答'].append('开头或收尾在处理选择前的比较')
     best = max(FRAMEWORKS, key=lambda item: scores[item[0]])[0]
     names = {item[0]: item[1] for item in FRAMEWORKS}
     return {'id': best, 'name': names[best], 'reason': '；'.join(why[best])}
@@ -258,14 +294,13 @@ def suggest_framework(topic):
 def assemble_sayframe_handoff(topic, interview=None, *, framework='', media_path='', media_sha256=''):
     """Reserve danjie.sayframe-handoff.v1. Does not call sayFrame or read media."""
     script = str(topic.get('script') or '')
-    chosen = ''
-    if isinstance(interview, dict):
-        chosen = str(interview.get('framework') or framework or '')
-    else:
-        interview = None
-        chosen = str(framework or '')
-    if chosen not in FRAMEWORK_IDS:
-        chosen = ''
+    source = dict(interview) if isinstance(interview, dict) else None
+    raw = (source.get('framework') if source else '') or framework or ''
+    chosen = canonical_framework(raw)
+    if source is not None and 'framework' in source:
+        mapped = canonical_framework(source.get('framework'))
+        if mapped:
+            source['framework'] = mapped
     return {
         'schema': 'danjie.sayframe-handoff.v1',
         'topicId': topic.get('id'),
@@ -273,7 +308,7 @@ def assemble_sayframe_handoff(topic, interview=None, *, framework='', media_path
         'mediaPath': str(media_path or ''),
         'mediaSha256': str(media_sha256 or ''),
         'framework': chosen,
-        'interview': interview,
+        'interview': source,
         'script': script,
     }
 
@@ -396,6 +431,7 @@ def require_topic(core, ident):
 
 
 def handoff_body(core, topic, framework):
+    framework = canonical_framework(framework)
     if framework not in FRAMEWORK_IDS:
         raise HTTPException(400, '请从 8 个访谈框架里选一个。')
     title = str(topic.get('title') or '').strip()
@@ -476,8 +512,11 @@ def validate_export(topic, payload):
     digest = script_sha256(str(topic.get('script') or ''))
     if payload.get('scriptSha256') != digest:
         raise HTTPException(409, MISMATCH)
-    if payload.get('framework') not in FRAMEWORK_IDS:
+    framework = canonical_framework(payload.get('framework'))
+    if framework not in FRAMEWORK_IDS:
         raise HTTPException(400, '回传里的框架不在 8 个访谈框架中。')
+    payload = dict(payload)
+    payload['framework'] = framework
     if not isinstance(payload.get('demo'), bool):
         raise HTTPException(400, '回传缺少 demo 标记，已拒绝。')
     if topic.get('demo') and payload.get('demo') is not True:
@@ -523,10 +562,10 @@ def panel_for(core, topic):
     link = read_link(core, topic['id'])
     suggestion = suggest_framework(topic)
     background = compress_background(topic) if str(topic.get('script') or '').strip() else ''
-    interview = link.get('result') if link else None
+    interview = present_interview(link.get('result')) if link else None
     handoff = None
     if link and link.get('handoff_id'):
-        handoff = {'handoffId': link['handoff_id'], 'revision': link['revision'], 'framework': link['framework'], 'scriptSha256': link['script_sha256'], 'openUrl': link['open_url'], 'demo': link['demo'], 'createdAt': link['created_at']}
+        handoff = {'handoffId': link['handoff_id'], 'revision': link['revision'], 'framework': canonical_framework(link.get('framework')), 'scriptSha256': link['script_sha256'], 'openUrl': link['open_url'], 'demo': link['demo'], 'createdAt': link['created_at']}
     return {
         'ready': topic.get('stage') == 'ready' and bool(str(topic.get('script') or '').strip()),
         'demo': bool(topic.get('demo')),
@@ -712,11 +751,12 @@ def attach(app, core):
         data = await read_body(request, limit=4000)
         topic = require_topic(core, ident)
         body = handoff_body(core, topic, data.get('framework'))
+        wire = {**body, 'framework': storycue_wire_framework(body['framework'])}
         directory = directory_or_error()
         token = token_for(directory)
         with secret_scope([token]):
             try:
-                response = requests.post(origin() + '/api/trial/handoff', headers={'X-StoryCue-Bridge-Token': token, 'Accept': 'application/json', 'Content-Type': 'application/json'}, json=body, timeout=20)
+                response = requests.post(origin() + '/api/trial/handoff', headers={'X-StoryCue-Bridge-Token': token, 'Accept': 'application/json', 'Content-Type': 'application/json'}, json=wire, timeout=20)
             except requests.RequestException:
                 log.info('storycue handoff unreachable')
                 raise HTTPException(503, offline_message(directory)) from None
