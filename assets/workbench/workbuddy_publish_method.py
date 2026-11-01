@@ -19,7 +19,11 @@ def publish(manifest):
  if state.status_code==404:state=LocalHTTP.get(BASE+'/state',timeout=15)
  state.raise_for_status();token=state.json()['token']
  response=LocalHTTP.post(BASE+'/methods/artifacts',json=packet,headers={'x-workbench-token':token},timeout=30)
- if not response.ok:raise ValueError(response.json().get('detail','成果没有接回，原文件仍保留'))
+ if not response.ok:
+  try:detail=response.json().get('detail')
+  except ValueError:detail=None
+  if not isinstance(detail,str) or not detail.strip():detail='成果没有接回，原文件仍保留'
+  raise ValueError(detail)
  return response.json()
 
 if __name__=='__main__':

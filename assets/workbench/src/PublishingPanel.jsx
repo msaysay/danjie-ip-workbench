@@ -1,7 +1,7 @@
 import React,{useEffect,useState} from 'react';
 import PublishCalendar from './PublishCalendar.jsx';
 import {PF,accountState,publishGaps,PlatformFields,PublishReadiness} from './publishCopy.jsx';
-const minAt=()=>new Date(Date.now()+10*3600*1000+5*60000).toISOString().slice(0,16);
+const SCHEDULE_LEAD_MS=2*60*60*1000;const minAt=()=>new Date(Date.now()+8*60*60*1000+SCHEDULE_LEAD_MS+5*60*1000).toISOString().slice(0,16);
 export default function PublishingPanel({api,data,p,edit,change,save,refresh,onSelect,setModal,fileURL}){
  const [platform,setPlatform]=useState('douyin'),[selected,setSelected]=useState([]),[busy,setBusy]=useState(false),[message,setMessage]=useState('');
  useEffect(()=>{if(!p?.output){const next=data.projects.find(item=>item.output&&!item.sources?.some(source=>source.kind==='business_memory'));if(next)onSelect(next.id)}},[p?.id]);

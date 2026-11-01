@@ -146,6 +146,14 @@ async def create_project(r:Request):
 async def update_project(ident:str,r:Request):
     d=await r.json();allowed=['title','brief','script','status','segments','platform_copy','sources']
     fields={k:v for k,v in d.items() if k in allowed}
+    if 'platform_copy' in fields:
+        copy=fields['platform_copy']
+        if not isinstance(copy,dict): raise HTTPException(400,'发布文字需要按平台分开写。请粘贴包含 platform_copy 的 JSON，原稿没有改')
+        for key,value in copy.items():
+            if key not in PLATFORMS: raise HTTPException(400,'只接抖音、视频号等已有平台的发布文字，原稿没有改')
+            if not isinstance(value,dict): raise HTTPException(400,PLATFORMS[key]+'的发布文字格式不对，原稿没有改')
+            for text in value.values():
+                if not isinstance(text,str): raise HTTPException(400,PLATFORMS[key]+'的每一项都要是文字，原稿没有改')
     original=get('project',ident)
     if 'expected_revision' in d and d['expected_revision']!=original.get('revision',0): raise HTTPException(409,'项目已有新版本，当前修改仍在输入框中；请刷新最新任务状态后核对再保存')
     if any(k in fields and fields[k]!=original.get(k,'') for k in ['script','brief']):
@@ -366,12 +374,12 @@ def task_pack(ident:str):
 ## 交付
 1. 主推选题和判断理由，列事实/推断/待核实；不凭标题猜正文。
 2. 符合本人口吻的口播文案，标明待补真实经历。
-3. 抖音、视频号分别给标题、简介、标签；热搜只引用带日期的真实检索结果。
-4. 拍摄/剪辑说明、人工确认点、停止重跑条件。
-5. JSON 结果格式：{{"script":"...","platform_copy":{{"douyin":{{"title":"...","desc":"...","tags":"..."}},"tencent":{{"title":"...","desc":"...","tags":"..."}}}}}}。可在工作台粘贴回填。
+3. 抖音、视频号分别给标题、简介、标签；热搜只引用带日期的真实检索结果。不要写小红书发布文案，工作台不发布到小红书。
+4. 拍摄时要注意的一句，以及需要本人确认的地方。成片由学员在外部剪好后，上传到发布页。不要在工作台里剪辑。
+5. JSON 结果格式：{{"script":"...","platform_copy":{{"douyin":{{"title":"...","desc":"...","tags":"..."}},"tencent":{{"title":"...","desc":"...","tags":"..."}}}}}}。可在发布页「粘贴 AI 写好的发布文字」回填。不要带 status、sources 或其他字段。
 
-## 本机路由
-研究/选题：ai-intel-daily、redfox-content-suite；剪辑：OpenFilm；数字人：ai-video-factory；封面：imagegen；发布：social-auto-upload。只用本任务必要能力。
+## 本机边界
+只做选题、口播和发布文字。成片在外部剪好再上传。封面在发布页选帧。不要启动剪辑。
 '''
     (folder/'CONTENT-TASK.md').write_text(prompt,encoding='utf-8')
     return {'prompt':prompt,'file':str((folder/'CONTENT-TASK.md').relative_to(DATA)).replace('\\','/')}
@@ -460,7 +468,7 @@ def publication_plan(p, accounts):
         if schedule:
             try: dt=datetime.strptime(schedule,'%Y-%m-%d %H:%M').replace(tzinfo=timezone(timedelta(hours=8)))
             except ValueError: raise HTTPException(400,'排期格式 YYYY-MM-DD HH:MM，北京时间')
-            if dt<=datetime.now(timezone(timedelta(hours=8)))+timedelta(hours=2): raise HTTPException(400,'排期至少在两小时后')
+            if dt<=datetime.now(timezone(timedelta(hours=8)))+timedelta(hours=2): raise HTTPException(400,'排期至少晚 2 小时')
             args+=['--schedule',schedule]
         delivery_key=digest({'account':aid,'sha':output['sha256'],'title':title,'desc':desc,'tags':tags,'schedule':schedule,'short_title':short_title,'covers':cover_hashes})
         items.append({'account_id':aid,'platform':a['platform'],'alias':a['alias'],'title':title,'desc':desc,'tags':tags,'schedule':schedule,'short_title':short_title,'cover_hashes':cover_hashes,'cover_files':cover_files,'delivery_key':delivery_key,'args':args,'state':'prepared'})
