@@ -146,6 +146,14 @@ async def create_project(r:Request):
 async def update_project(ident:str,r:Request):
     d=await r.json();allowed=['title','brief','script','status','segments','platform_copy','sources']
     fields={k:v for k,v in d.items() if k in allowed}
+    if 'platform_copy' in fields:
+        copy=fields['platform_copy']
+        if not isinstance(copy,dict): raise HTTPException(400,'发布文字需要按平台分开写。请粘贴包含 platform_copy 的 JSON，原稿没有改')
+        for key,value in copy.items():
+            if key not in PLATFORMS: raise HTTPException(400,'只接抖音、视频号等已有平台的发布文字，原稿没有改')
+            if not isinstance(value,dict): raise HTTPException(400,PLATFORMS[key]+'的发布文字格式不对，原稿没有改')
+            for text in value.values():
+                if not isinstance(text,str): raise HTTPException(400,PLATFORMS[key]+'的每一项都要是文字，原稿没有改')
     original=get('project',ident)
     if 'expected_revision' in d and d['expected_revision']!=original.get('revision',0): raise HTTPException(409,'项目已有新版本，当前修改仍在输入框中；请刷新最新任务状态后核对再保存')
     if any(k in fields and fields[k]!=original.get(k,'') for k in ['script','brief']):
@@ -366,12 +374,12 @@ def task_pack(ident:str):
 ## 交付
 1. 主推选题和判断理由，列事实/推断/待核实；不凭标题猜正文。
 2. 符合本人口吻的口播文案，标明待补真实经历。
-3. 抖音、视频号分别给标题、简介、标签；热搜只引用带日期的真实检索结果。
-4. 拍摄/剪辑说明、人工确认点、停止重跑条件。
-5. JSON 结果格式：{{"script":"...","platform_copy":{{"douyin":{{"title":"...","desc":"...","tags":"..."}},"tencent":{{"title":"...","desc":"...","tags":"..."}}}}}}。可在工作台粘贴回填。
+3. 抖音、视频号分别给标题、简介、标签；热搜只引用带日期的真实检索结果。不要写小红书发布文案，工作台不发布到小红书。
+4. 拍摄时要注意的一句，以及需要本人确认的地方。成片由学员在外部剪好后，上传到发布页。不要在工作台里剪辑。
+5. JSON 结果格式：{{"script":"...","platform_copy":{{"douyin":{{"title":"...","desc":"...","tags":"..."}},"tencent":{{"title":"...","desc":"...","tags":"..."}}}}}}。可在发布页「粘贴 AI 写好的发布文字」回填。不要带 status、sources 或其他字段。
 
-## 本机路由
-研究/选题：ai-intel-daily、redfox-content-suite；剪辑：OpenFilm；数字人：ai-video-factory；封面：imagegen；发布：social-auto-upload。只用本任务必要能力。
+## 本机边界
+只做选题、口播和发布文字。成片在外部剪好再上传。封面在发布页选帧。不要启动剪辑。
 '''
     (folder/'CONTENT-TASK.md').write_text(prompt,encoding='utf-8')
     return {'prompt':prompt,'file':str((folder/'CONTENT-TASK.md').relative_to(DATA)).replace('\\','/')}
@@ -403,7 +411,7 @@ def account_action(ident:str,action:str):
     a=get('account',ident)
     if a['platform']=='xiaohongshu': raise HTTPException(400,XHS_PUBLISH_BLOCKED)
     if action not in ['login','check']: raise HTTPException(404)
-    if not SAUPY.exists(): raise HTTPException(409,'请先安装发布器依赖')
+    if not publisher_ready(): raise HTTPException(409,'请先安装发布器依赖')
     def work(j):
         args=[SAUPY,SAU/'sau_cli.py',a['platform'],action,'--account',a['alias']]
         if action=='login': args+=['--headed']
@@ -426,6 +434,76 @@ def account_qrcode(ident:str):
     if not images: raise HTTPException(404,'二维码尚未就绪，请查看本机登录窗口')
     return FileResponse(max(images,key=lambda p:p.stat().st_mtime),media_type='image/png',headers={'Cache-Control':'no-store'})
 
+def cover_file_ok(p, rel):
+    if not isinstance(rel, str) or not rel: return False
+    path=(DATA/rel).resolve(); root=project_dir(p['id']).resolve()
+    return path.is_relative_to(root) and path.is_file() and path.suffix.lower() in ['.jpg','.jpeg','.png'] and path.stat().st_size>0
+
+def _cover_pair(copy, platform):
+    row=(copy or {}).get(platform) or {}
+    return row.get('cover'), row.get('cover_landscape')
+
+def _write_cover_pair(copy, platform, portrait, landscape):
+    row=dict(copy.get(platform) or {})
+    changed=row.get('cover')!=portrait or row.get('cover_landscape')!=landscape
+    row['cover']=portrait; row['cover_landscape']=landscape; copy[platform]=row
+    return changed
+
+def build_midframe_covers(p):
+    """Crop the middle frame to 3:4 and 4:3, the same way Cover Studio does."""
+    output=p['output']; source=DATA/output['file']; duration=float(output.get('duration') or 0)
+    at=duration/2 if duration>0 else 0
+    if duration>0.12: at=min(at, duration-0.06)
+    at=round(at, 2)
+    folder=project_dir(p['id'])/'publication'/'frame-studio'; folder.mkdir(parents=True, exist_ok=True)
+    frame=folder/f"frame-{output['sha256'][:12]}-{round(at*1000)}.jpg"
+    if not frame.exists() or not frame.stat().st_size:
+        temporary=folder/('preview-'+uid()+'.jpg')
+        try:
+            run(['ffmpeg','-hide_banner','-loglevel','error','-ss',str(at),'-i',source,'-frames:v','1','-q:v','2','-y',temporary])
+            if not temporary.exists() or not temporary.stat().st_size: raise RuntimeError('empty frame')
+            temporary.replace(frame)
+        except Exception:
+            if temporary.exists(): temporary.unlink()
+            raise
+    version=uid(); made={}
+    for key,(width,height) in {'portrait':(1080,1440),'landscape':(1440,1080)}.items():
+        target=folder/f'cover-{version}-{key}.jpg'
+        vf=f'scale={width}:{height}:force_original_aspect_ratio=increase,scale=ceil(iw*1/2)*2:ceil(ih*1/2)*2,crop={width}:{height}:(iw-{width})*0.5:(ih-{height})*0.5,setsar=1'
+        run(['ffmpeg','-hide_banner','-loglevel','error','-i',frame,'-frames:v','1','-vf',vf,'-q:v','2','-y',target])
+        if not target.exists() or not target.stat().st_size: raise RuntimeError('empty cover')
+        made[key]=target.relative_to(DATA.resolve()).as_posix()
+    frame_rel=frame.relative_to(DATA.resolve()).as_posix()
+    manifest={'version':version,'kind':'video_frame','auto':True,'video_sha256':output['sha256'],'at':at,'crop':{'portrait':{'x':.5,'y':.5,'zoom':1},'landscape':{'x':.5,'y':.5,'zoom':1}},'selected_frame':frame_rel,'portrait':made['portrait'],'landscape':made['landscape'],'reference':frame_rel,'created':now()}
+    return made['portrait'], made['landscape'], frame_rel, at, manifest
+
+def ensure_publish_covers(p):
+    """Attach portrait and landscape covers unless the learner cleared them on purpose."""
+    with LOCK:
+        current=get('project', p['id'])
+        prep=dict(current.get('publish_preparation') or {})
+        if prep.get('cover_state')=='cleared': return current, 'cleared'
+        copy=json.loads(json.dumps(current.get('platform_copy') or {}))
+        douyin=_cover_pair(copy, 'douyin'); tencent=_cover_pair(copy, 'tencent')
+        douyin_ok=cover_file_ok(current, douyin[0]) and cover_file_ok(current, douyin[1])
+        tencent_ok=cover_file_ok(current, tencent[0]) and cover_file_ok(current, tencent[1])
+        generated=None
+        if douyin_ok or tencent_ok:
+            portrait, landscape=(douyin if douyin_ok else tencent)
+            changed=False
+            if not douyin_ok: changed=_write_cover_pair(copy, 'douyin', portrait, landscape) or changed
+            if not tencent_ok: changed=_write_cover_pair(copy, 'tencent', portrait, landscape) or changed
+            if changed: current=patch('project', current['id'], {'platform_copy':copy})
+        else:
+            try: portrait, landscape, frame_rel, at, manifest=build_midframe_covers(current)
+            except (RuntimeError, OSError): raise HTTPException(400,'这条成片暂时截不出封面。请确认视频能播放，或在封面里自己选一帧') from None
+            _write_cover_pair(copy, 'douyin', portrait, landscape); _write_cover_pair(copy, 'tencent', portrait, landscape)
+            prep.update(cover_state='auto_frame', cover_design=manifest, selected_frame={'file':frame_rel,'at':at})
+            generated=manifest
+            current=patch('project', current['id'], {'platform_copy':copy,'cover_studio':manifest,'publish_preparation':prep})
+        source='auto_frame' if generated or (current.get('publish_preparation') or {}).get('cover_state')=='auto_frame' else 'existing'
+        return current, source
+
 def publication_plan(p, accounts):
     if not accounts: raise HTTPException(400,'至少选择一个平台账号')
     if len(accounts)!=len(set(accounts)): raise HTTPException(400,'同一账号不能在一个批次中重复选择')
@@ -434,9 +512,13 @@ def publication_plan(p, accounts):
     if output.get('kind')=='finished_video':
         if hashlib.sha256((DATA/output['file']).read_bytes()).hexdigest()!=output.get('sha256'):raise HTTPException(409,'成片文件已改变，请重新上传并核对')
     elif output.get('edit_hash')!=edit_hash(p): raise HTTPException(409,'素材或剪辑方案已改变，请重新导出成片')
+    selected=[get('account', aid) for aid in accounts]
+    cover_source='unused'
+    if any(a['platform'] in ['douyin','tencent'] for a in selected):
+        p, cover_source=ensure_publish_covers(p)
+        output=p.get('output')
     items=[]
-    for aid in accounts:
-        a=get('account',aid)
+    for aid, a in zip(accounts, selected):
         if a['platform']=='xiaohongshu': raise HTTPException(400,XHS_PUBLISH_BLOCKED)
         copy=p.get('platform_copy',{}).get(a['platform'],{})
         title=str(copy.get('title','')).strip();desc=str(copy.get('desc',''));tags=str(copy.get('tags',''))
@@ -446,8 +528,9 @@ def publication_plan(p, accounts):
         args=[str(SAUPY),str(SAU/'sau_cli.py'),a['platform'],'upload-video','--account',a['alias'],'--file',str(DATA/output['file']),'--title',title,'--desc',desc]
         if tags: args+=['--tags',tags]
         cover_hashes={};cover_files={}
-        for field,flag in [('cover','--thumbnail-portrait'),('cover_landscape','--thumbnail-landscape')]:
-            if copy.get(field) and a['platform'] in ['douyin','tencent']:
+        if a['platform'] in ['douyin','tencent'] and cover_source!='cleared':
+            for field,flag in [('cover','--thumbnail-portrait'),('cover_landscape','--thumbnail-landscape')]:
+                if not copy.get(field): raise HTTPException(400,'横竖封面还没做好，请重新生成发布计划')
                 cover=(DATA/str(copy[field])).resolve()
                 if not cover.is_relative_to(project_dir(p['id']).resolve()) or not cover.is_file() or cover.suffix.lower() not in ['.jpg','.jpeg','.png']:raise HTTPException(400,'封面文件需要来自本项目，请重新选择')
                 args+=[flag,str(cover)];cover_hashes[field]=hashlib.sha256(cover.read_bytes()).hexdigest();cover_files[field]=cover.relative_to(DATA.resolve()).as_posix()
@@ -460,11 +543,11 @@ def publication_plan(p, accounts):
         if schedule:
             try: dt=datetime.strptime(schedule,'%Y-%m-%d %H:%M').replace(tzinfo=timezone(timedelta(hours=8)))
             except ValueError: raise HTTPException(400,'排期格式 YYYY-MM-DD HH:MM，北京时间')
-            if dt<=datetime.now(timezone(timedelta(hours=8)))+timedelta(hours=2): raise HTTPException(400,'排期至少在两小时后')
+            if dt<=datetime.now(timezone(timedelta(hours=8)))+timedelta(hours=2): raise HTTPException(400,'排期至少晚 2 小时')
             args+=['--schedule',schedule]
         delivery_key=digest({'account':aid,'sha':output['sha256'],'title':title,'desc':desc,'tags':tags,'schedule':schedule,'short_title':short_title,'covers':cover_hashes})
         items.append({'account_id':aid,'platform':a['platform'],'alias':a['alias'],'title':title,'desc':desc,'tags':tags,'schedule':schedule,'short_title':short_title,'cover_hashes':cover_hashes,'cover_files':cover_files,'delivery_key':delivery_key,'args':args,'state':'prepared'})
-    return {'project':p['id'],'output_sha256':output['sha256'],'items':items}
+    return {'project':p['id'],'output_sha256':output['sha256'],'cover_source':cover_source,'items':items}
 
 @app.post('/api/projects/{ident}/publish-plan')
 async def prepare_publish(ident:str,r:Request):
@@ -563,10 +646,22 @@ def skill_read(ident:str):
 def templates():
     path=ROOT/'catalog.json'
     return json.loads(path.read_text(encoding='utf-8')) if path.exists() else {'status':'未同步','templates':[]}
+# Import the installed distribution, not sau_cli. sau_cli loads every uploader
+# (and writes vendor log files); /api/health is also fetched with a short timeout
+# while the portable runtime is starting. A venv python left by a refused
+# `pip install -e` does not count.
+PUBLISHER_PROBE='import importlib.metadata, sau_commands; importlib.metadata.version("social-auto-upload")'
+def publisher_ready():
+    if not SAUPY.is_file(): return False
+    try:
+        done=subprocess.run([str(SAUPY),'-I','-c',PUBLISHER_PROBE],cwd=ROOT,capture_output=True,timeout=30,stdin=subprocess.DEVNULL,
+            env={**os.environ,'PYTHONUTF8':'1','PYTHONDONTWRITEBYTECODE':'1'},creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
+    except (OSError,subprocess.TimeoutExpired): return False
+    return done.returncode==0
 @app.get('/api/health')
 def health():
     return {'time':now(),'python':sys.version.split()[0],'ffmpeg':bool(shutil.which('ffmpeg')),'ffprobe':bool(shutil.which('ffprobe')),
-        'openfilm':OPENFILM.exists(),'openfilm_version':'0.2.6','publisher':SAUPY.exists(),
+        'openfilm':OPENFILM.exists(),'openfilm_version':'0.2.6','publisher':publisher_ready(),
         'model_connected':bool(os.getenv('WORKBENCH_MODEL_BASE_URL') and os.getenv('WORKBENCH_MODEL')),
         'accounts_verified':sum(a.get('status')=='已验证' for a in listing('account')),'data_dir':str(DATA),'listen':'127.0.0.1','edit_policy':EDIT_POLICY}
 
