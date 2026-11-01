@@ -5,6 +5,7 @@ import hashlib,json,os,re,sys,threading,time
 from fastapi import Request,UploadFile,File,HTTPException
 from memory_limits import MAX_PROFILE_BYTES
 from classroom_research import TikHub,PLATFORMS,HOT_PLATFORMS,validate_config,normalize,plan,curate,protect,published_time,ranked_board
+from review_board import build_review_board,clean_prefs
 
 VERSION='0.8.0'
 def daily_reports(rows,projects,account_rows=None):
@@ -235,8 +236,24 @@ def attach(app,core):
    if core.get('project',p['id']).get('revision')!=p.get('revision'):raise HTTPException(409,'资料刚有新修改，旧说明已保留，请再找一次已有成果')
    saved=core.patch('project',p['id'],{'sources':[next_memory if s.get('kind')=='business_memory' else s for s in p['sources']]})
   return {'imported':imported,'project_id':saved['id'],'note':'原件已接住，内容仍待本人核对。'}
+ def review_prefs():
+  row=next((item for item in core.listing('review_board_prefs') if item.get('id')=='main'),None)
+  return {'weekly_goal':None if not row else row.get('weekly_goal'),'checked':[] if not row else list(row.get('checked') or [])}
+ def review_board(days=7,platform='all'):
+  if days not in (1,7) or platform not in ('all','douyin','tencent'):raise HTTPException(400,'请选择昨天或近7日，平台选抖音、视频号或全部')
+  return build_review_board(core.listing('metric'),core.listing('project'),core.listing('account_daily'),review_prefs(),days=days,platform=platform)
  @app.get('/api/classroom/reports')
- def reports():return {'days':daily_reports(core.listing('metric'),core.listing('project'),core.listing('account_daily'))[:31],'schedule':latest('classroom_schedule',{'time':'09:00','analytics_enabled':False}),'note':'只展示实际取得的后台记录。账号每日新增与作品累计值分开，不混算。'}
+ def reports():
+  metrics,projects,accounts=core.listing('metric'),core.listing('project'),core.listing('account_daily')
+  return {'days':daily_reports(metrics,projects,accounts)[:31],'schedule':latest('classroom_schedule',{'time':'09:00','analytics_enabled':False}),'note':'只展示实际取得的后台记录。账号每日新增与作品累计值分开，不混算。','board':build_review_board(metrics,projects,accounts,review_prefs())}
+ @app.get('/api/classroom/reports/board')
+ def reports_board(days:int=7,platform:str='all'):return review_board(days,platform)
+ @app.post('/api/classroom/reports/board')
+ async def reports_board_save(r:Request,days:int=7,platform:str='all'):
+  try:prefs=clean_prefs(await r.json(),review_prefs())
+  except ValueError as e:raise HTTPException(400,str(e))
+  core.put('review_board_prefs',{'id':'main',**prefs})
+  return review_board(days,platform)
  @app.post('/api/classroom/reports/update')
  def reports_update():return core.job('收回我的后台数据','analytics-pipeline',lambda _:analytics_pipeline())
  @app.post('/api/classroom/schedule')
