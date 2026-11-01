@@ -124,5 +124,54 @@ class TikHubConnectTests(unittest.TestCase):
         self.assertIn('xiaohongshu_user_search', routes)
 
 
+    def test_weibo_account_id_comes_from_user_url(self):
+        rows = research.normalize({'results': [{
+            'id': 'post1', 'text': '开店前先核对哪一项材料',
+            'user_url': 'https://weibo.com/u/99887766', 'user': {'screen_name': '演示作者'},
+        }]}, 'weibo', 'keyword', '开店')
+        self.assertEqual(rows[0]['account_key'], '99887766')
+        self.assertEqual(rows[0]['author'], '演示作者')
+        bare = research.normalize({'results': [{
+            'id': 'post2', 'text': '另一条微博内容',
+            'user_url': 'https://www.weibo.com/112233', 'user': {'screen_name': '另一个'},
+        }]}, 'weibo', 'keyword', '开店')
+        self.assertEqual(bare[0]['account_key'], '112233')
+
+    def test_account_search_uses_user_lists_and_platform_ids(self):
+        hub = s.CLASSROOM['tikhub']
+        old_status, old_call = hub.status, hub.call
+        box = {}
+        hub.status = lambda: {'configured': True, 'suffix': 'demo'}
+        hub.call = lambda route, payload, key=None: box['payload']
+        try:
+            box['payload'] = {'data': {'filters': [{'id': 'all', 'name': '全部'}], 'users': [{'nickname': '笔记作者', 'user_id': 'xhs-user-1'}]}}
+            found = self.post('/experience/research/accounts/search', {'platform': 'xiaohongshu', 'keyword': '笔记'})
+            self.assertEqual(found.status_code, 200, found.text)
+            self.assertEqual([(item['name'], item['account_key']) for item in found.json()['items']], [('笔记作者', 'xhs-user-1')])
+
+            box['payload'] = {'data': {'user_list': [{'nickname': '抖音作者', 'sec_uid': 'MS4wLjABAAAAdemo'}, {'nickname': '短号', 'user_id': '123'}]}}
+            found = self.post('/experience/research/accounts/search', {'platform': 'douyin', 'keyword': '作者'})
+            self.assertEqual(found.status_code, 200, found.text)
+            self.assertEqual([(item['name'], item['account_key']) for item in found.json()['items']], [('抖音作者', 'MS4wLjABAAAAdemo')])
+
+            box['payload'] = {'data': {'items': [
+                {'title': '<em>演示</em>公众号', 'jumpInfo': {'userName': 'gh_demo123'}},
+                {'title': '不是号', 'jumpInfo': {'userName': 'not_a_account'}},
+            ]}}
+            found = self.post('/experience/research/accounts/search', {'platform': 'wechat', 'keyword': '演示'})
+            self.assertEqual(found.status_code, 200, found.text)
+            self.assertEqual([(item['name'], item['account_key']) for item in found.json()['items']], [('演示公众号', 'gh_demo123')])
+
+            box['payload'] = {'data': {'items': [
+                {'title': '我的视频号', 'jumpInfo': {'userName': 'v2_abc@finder'}},
+                {'title': '普通用户', 'jumpInfo': {'userName': 'gh_notfinder'}},
+            ]}}
+            found = self.post('/experience/research/accounts/search', {'platform': 'tencent', 'keyword': '视频号'})
+            self.assertEqual(found.status_code, 200, found.text)
+            self.assertEqual([(item['name'], item['account_key']) for item in found.json()['items']], [('我的视频号', 'v2_abc@finder')])
+        finally:
+            hub.status, hub.call = old_status, old_call
+
+
 if __name__ == '__main__':
     unittest.main()

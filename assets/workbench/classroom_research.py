@@ -193,7 +193,9 @@ def normalize(payload,platform,kind,query):
   if platform=='xiaohongshu':account=first(author.get('user_id'),author.get('userid'),author.get('id'),account)
   if platform=='kuaishou':account=first(author.get('user_id'),author.get('id'),item.get('userId'),item.get('user_id'),account)
   if platform=='bilibili':account=first(author.get('mid'),item.get('mid'),account)
-  if platform=='weibo':account=first(author.get('idstr'),author.get('id'),account)
+  if platform=='weibo':
+   uid=re.match(r'(?://|https?://)(?:www\.)?weibo\.com/(?:u/)?(\d+)',str(item.get('user_url') or ''))
+   account=first(author.get('idstr'),author.get('id'),uid.group(1) if uid else None,account)
   if platform=='zhihu':account=first(author.get('url_token'),account)
   if platform=='xiaohongshu' and not url and ident:url='https://www.xiaohongshu.com/explore/'+str(ident)
   if platform=='douyin' and kind=='hot' and item.get('sentence_id'):url='https://www.douyin.com/hot/'+str(item['sentence_id'])
