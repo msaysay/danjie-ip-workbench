@@ -74,7 +74,7 @@ export function PlatformFields({platform,copy,onChange,disabled}){
    <li className="optional"><span className="need optional">可不填</span><span>视频说明：补充给观众看的话。不写也能发。</span></li>
    <li className="optional"><span className="need optional">可不填</span><span>话题：方便别人搜到。几个词用逗号分开，不写也能发。</span></li>
    <li className={scheduleProblem(copy.schedule)?'missing':'optional'}><span className="need optional">可不填</span><span>发布时间：不选就是确认后马上发。要预约就选北京时间，并且至少比现在晚 2 小时。</span></li>
-   <li className="optional"><span className="need optional">可不填</span><span>封面：竖图和横图。没有也能发，有的话列表里更好看。</span></li>
+   <li className="optional"><span className="need optional">可不填</span><span>封面：竖图和横图。不选时，发布计划会用成片中间的画面自动做成封面。点「这次不用自定义封面」则不截帧。</span></li>
   </ul>
   <fieldset className="publish-copy-fields" disabled={disabled}>
    <label>
@@ -106,12 +106,13 @@ export function PublishReadiness({gaps}){
  return <div className="publish-gaps" role="status"><strong>还差这些，才能进入确认发布</strong><ul>{gaps.map(gap=><li key={gap.id}>{gap.text}</li>)}</ul></div>;
 }
 
-function coverLine(item){
+function coverLine(item,source){
+ if(source==='cleared')return '这次不用自定义封面。平台会自己挑一帧。';
  const portrait=!!item.cover_files?.cover,landscape=!!item.cover_files?.cover_landscape;
- if(portrait&&landscape)return '带了竖图和横图封面。';
+ if(portrait&&landscape)return source==='auto_frame'?'带了竖图和横图封面，用的是成片中间的画面。':'带了竖图和横图封面。';
  if(portrait)return '带了竖图封面，没有横图。';
  if(landscape)return '带了横图封面，没有竖图。';
- return '没有带封面。没有封面也会按你确认的文字提交。';
+ return '还没有横竖封面。请先生成，或点「这次不用自定义封面」。';
 }
 
 export function ConfirmPublishSummary({plan,accounts,projects,fileURL}){
@@ -129,7 +130,7 @@ export function ConfirmPublishSummary({plan,accounts,projects,fileURL}){
     {item.platform==='tencent'&&<p>{item.short_title?'短标题：'+item.short_title:'短标题：你没填。发出时会用标题自动做成 7 到 15 个字；标题太短时，会补上「精彩内容分享」里的字。'}</p>}
     <p>{item.desc?.trim()?item.desc:'没有写视频说明。'}</p>
     <p className="muted small">{item.tags?.trim()?'话题：'+item.tags:'没有写话题。'}</p>
-    <p className="muted small">{coverLine(item)}</p>
+    <p className="muted small">{coverLine(item,plan.cover_source)}</p>
     <div className="final-cover-check">{[['cover','竖封面'],['cover_landscape','横封面']].map(([key,label])=>item.cover_files?.[key]&&<figure key={key}><img src={fileURL(item.cover_files[key])} alt={PF[item.platform]+label}/><figcaption>{label}</figcaption></figure>)}</div>
    </div>;
   })}

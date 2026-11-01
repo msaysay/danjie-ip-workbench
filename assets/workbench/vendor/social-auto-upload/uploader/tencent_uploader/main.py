@@ -17,6 +17,10 @@ from patchright.async_api import async_playwright
 from conf import BASE_DIR, DEBUG_MODE, LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
 from uploader.base_video import BaseVideoUploader
 from utils.base_social_media import set_init_script
+from uploader.publish_guards import apply_original_claim as claim_original
+from uploader.publish_guards import apply_tencent_ai_label
+from uploader.publish_guards import clear_tencent_location
+from uploader.publish_guards import set_tencent_location
 from utils.log import tencent_logger
 
 TENCENT_LOGIN_URL = "https://channels.weixin.qq.com"
@@ -787,25 +791,22 @@ class TencentBaseUploader(BaseVideoUploader):
             except Exception:
                 pass
 
+    async def apply_location(self, page: Page) -> None:
+        # 未填写地点时清掉表单记住或推荐的位置，避免发出「德宏」这类残留定位。
+        location = (getattr(self, "location", None) or "").strip()
+        if location:
+            await set_tencent_location(page, location)
+            tencent_logger.success(_msg("📍", f"位置已写成：{location}"))
+            return
+        await clear_tencent_location(page)
+        tencent_logger.success(_msg("📍", "已清掉位置，这次不带定位"))
+
     async def apply_original_statement(self, page: Page) -> None:
-        # 视频号「视频标注」下拉：本项目成片经 AI 处理（TTS 配音、AI 字幕、AI 前贴片），
-        # 依平台合规要求如实选「含AI生成内容」（与「内容为转载」等并列，选定即可、无需填写来源）。
-        # 注意：这与上方独立的「声明原创」复选框是两个不同字段，本项目走 AI 标注、不勾原创声明。
-        label_text = getattr(self, "content_label", None) or "含AI生成内容"
-        try:
-            entry = page.get_by_text("选择视频标注", exact=True).first
-            if not await entry.count():
-                tencent_logger.info(_msg("🧾", "当前页面未发现「视频标注」入口，跳过标注继续发布"))
-                return
-            await entry.click()
-            await page.wait_for_timeout(800)
-            option = page.get_by_text(label_text, exact=True).first
-            await option.wait_for(state="visible", timeout=5000)
-            await option.click()
-            await page.wait_for_timeout(500)
-            tencent_logger.success(_msg("🏷️", f"视频标注已选择：{label_text}"))
-        except Exception as exc:
-            tencent_logger.warning(_msg("😵", f"设置视频标注「{label_text}」失败，跳过继续发布：{exc}"))
+        # 原创和「含AI生成内容」是两项，每条视频都要选上。没选中就停止，不再跳过。
+        await apply_tencent_ai_label(page)
+        tencent_logger.success(_msg("🏷️", "视频标注已选择：含AI生成内容"))
+        await claim_original(page, platform_name="视频号")
+        tencent_logger.success(_msg("🏷️", "已声明原创"))
 
     async def wait_for_upload_complete(
         self, page: Page, timeout_seconds: int = 3600, max_retries: int = 3
@@ -956,6 +957,7 @@ class TencentVideo(TencentBaseUploader):
         debug: bool = DEBUG_MODE,
         headless: bool = LOCAL_CHROME_HEADLESS,
         collection_name: str | None = None,
+        location: str | None = None,
     ):
         super().__init__(
             publish_date=publish_date,
@@ -975,6 +977,7 @@ class TencentVideo(TencentBaseUploader):
         self.thumbnail_landscape_path = thumbnail_landscape_path
         self.thumbnail_portrait_path = thumbnail_portrait_path or thumbnail_path
         self.short_title = short_title
+        self.location = (location or "").strip()
 
     async def validate_upload_args(self):
         await self.validate_base_args()
@@ -1128,6 +1131,7 @@ class TencentVideo(TencentBaseUploader):
                 await self.set_schedule_time_tencent(page, self.publish_date)
 
             await self.set_short_title(page, self.title, self.short_title)
+            await self.apply_location(page)
             await self.submit_publish(page)
 
             await context.storage_state(path=self.account_file)

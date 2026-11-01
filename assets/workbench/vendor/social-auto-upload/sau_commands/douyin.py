@@ -49,7 +49,12 @@ def register(platform_parsers):
     upload_video_parser.add_argument("--product-title", default="", help="Optional product title")
     upload_video_parser.add_argument(
         "--declaration",
-        help="Exact Douyin self-declaration option text; omitted means do not set one",
+        help="Ignored for video upload; every video is marked 内容由AI生成 and 声明原创",
+    )
+    upload_video_parser.add_argument(
+        "--location",
+        default="",
+        help="Only set a place when this is non-empty. Empty clears any suggested place",
     )
     upload_video_parser.add_argument("--collection", default=None, help="Optional collection name to add the work into (must already exist)")
     add_runtime_flags(upload_video_parser)
@@ -84,6 +89,7 @@ class DouyinVideoUploadRequest:
     headless: bool = True
     declaration: str | None = None
     collection_name: str | None = None
+    location: str = ""
 
 
 @dataclass(slots=True)
@@ -136,6 +142,7 @@ async def upload_video(request: DouyinVideoUploadRequest) -> Path:
         productLink=request.product_link,
         productTitle=request.product_title,
         declaration=request.declaration,
+        location=request.location,
         publish_strategy=request.publish_strategy,
         debug=request.debug,
         headless=request.headless,
@@ -199,6 +206,7 @@ async def run(args):
             product_link=args.product_link,
             product_title=args.product_title,
             declaration=args.declaration,
+            location=args.location,
             publish_strategy=publish_strategy,
             debug=args.debug,
             headless=args.headless,
