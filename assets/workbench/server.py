@@ -62,6 +62,12 @@ def listing(kind):
     return [json.loads(r[0]) for r in rows]
 def patch(kind, ident, values):
     with LOCK: return put(kind,{**get(kind,ident),**values,'id':ident})
+def remove(kind, ident):
+    with LOCK, connect() as c:
+        row=c.execute('SELECT body FROM records WHERE kind=? AND id=?',(kind,ident)).fetchone()
+        if not row: raise HTTPException(404,'记录不存在')
+        c.execute('DELETE FROM records WHERE kind=? AND id=?',(kind,ident))
+        return json.loads(row[0])
 def project_dir(ident):
     if not re.fullmatch('[a-zA-Z0-9_-]{1,64}',ident): raise HTTPException(400,'无效项目')
     p=DATA/'projects'/ident; p.mkdir(parents=True,exist_ok=True); return p
@@ -131,6 +137,26 @@ async def idea_create(r:Request):
 @app.patch('/api/ideas/{ident}')
 async def idea_patch(ident:str,r:Request):
     d=await r.json();return patch('idea',ident,{k:v for k,v in d.items() if k in ['title','url','notes','status']})
+@app.post('/api/ideas/{ident}/remove')
+def idea_remove(ident:str):
+    idea=get('idea',ident)
+    pid=WORKFLOW['settings']().get('profile_id')
+    if idea.get('profile_id') and pid and idea.get('profile_id')!=pid: raise HTTPException(409,'这条参考不属于当前业务')
+    return remove('idea',ident)
+@app.post('/api/ideas/{ident}/restore')
+async def idea_restore(ident:str,r:Request):
+    d=await r.json()
+    if not isinstance(d,dict) or d.get('id')!=ident: raise HTTPException(400,'这条参考对不上，没有恢复')
+    title=str(d.get('title') or '').strip()
+    if not title or len(title)>300: raise HTTPException(400,'这条参考没有标题')
+    pid=WORKFLOW['settings']().get('profile_id')
+    if d.get('profile_id') and pid and d.get('profile_id')!=pid: raise HTTPException(409,'这条参考不属于当前业务')
+    try: return get('idea',ident)
+    except HTTPException: pass
+    kept={k:d[k] for k in ['profile_id','source_research_id','url','source','notes','source_text','status','created'] if k in d and isinstance(d[k],str)}
+    for key in ['url','source','notes','source_text']:
+        if key in kept: kept[key]=kept[key][:2000]
+    return put('idea',{**kept,'id':ident,'title':title[:300],'status':kept.get('status') or '待判断','profile_id':d.get('profile_id') or pid})
 @app.post('/api/ideas/{ident}/project')
 def idea_project(ident:str):
     d=get('idea',ident)

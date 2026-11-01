@@ -3,7 +3,7 @@ import base64,hashlib,html,json,mimetypes,re
 from pathlib import Path
 from fastapi import Request,HTTPException
 from method_preview import preview,candidates,scripts_in,trusted_runtime,declared_modes,topic_binding,source_strings
-from danjie_writing import request_context,validate_result,homework_version,asset_time
+from danjie_writing import request_context,validate_result,homework_version,asset_time,prepared_draft_status,reference_sources
 from memory_limits import MAX_PROFILE_BYTES
 
 METHODS=[('01','六维目标客户卡','客群卡','shared','先读懂你要服务的客户'),('08','六维人设卡','人设卡','shared','接着你本人已经做过的人设'),('09','四行简介','四行简介','shared','看看账号介绍怎么表达'),('02','三圈选题','三圈选题','fumo','点方向、处境和情境，找到要讲的问题'),('03','当头一棒','当头一棒','fumo','同一个题，看看怎样讲出判断'),('07','开场八式','开场八式','fumo','从八种开头中挑贴题的讲法'),('04','以理服人','以理服人','fumo','看看用什么事情、数字或对比来说明'),('05','亮出绝活','亮出绝活','fumo','沿用已经完成的本人实力介绍'),('06','指条明路','指条明路','fumo','给这条内容选一个清楚的收尾'),('10','乾坤大挪移','乾坤大挪移','qiankun','从客户、相关人和大众话题之间找连接'),('12','一题多讲','一题多讲','qiankun','同一题换关注点、问法和情境'),('11','六脉神剑','六脉神剑','six','接着已有的真实故事材料找表达')]
@@ -73,9 +73,10 @@ def attach(app,core):
    ident=existing['id'] if existing else core.uid();choice={'module':a['module'],'asset_id':a['id'],'asset_sha':a['sha256'],'title':title,'state':state}
    if not existing:
     topic={'id':ident,'profile_id':p['id'],'title':title,'audience':'沿用本次客户卡','reason':'从'+a['module']+'中由本人选定','needs':[],'framework':[{'key':k,'label':label,'skill':skill,'text':''} for k,label,skill in [('opening','开头','03或07'),('reason','支撑','04'),('identity','本人实力','05'),('ending','收尾','06')]],'confirmed':True,'stage':'topic','script':'','history':[],'demo':m['mode']=='fictional_demo','origin':'method_choice','method_choices':[choice],'created':core.now()}
+    idea_rows=[x for x in core.listing('idea') if x.get('profile_id')==p['id']]
     ready=next((x for x in core.listing('method_draft') if x.get('profile_id')==p['id'] and x['title']==title and x.get('writing_material_version')==homework_version(core.ROOT,m)),None)
     if ready:
-     ctx=request_context(core.ROOT,m,topic,[x for x in core.listing('writing_feedback') if x.get('profile_id')==p['id']][:8],[x for x in core.listing('idea') if x.get('profile_id')==p['id']][:8]);topic['prepared_script']=validate_result(ready['result'],ctx)
+     ctx=request_context(core.ROOT,m,topic,[x for x in core.listing('writing_feedback') if x.get('profile_id')==p['id']][:8],idea_rows[:8]);topic['prepared_script']=validate_result(ready['result'],ctx);topic['source_references']=reference_sources(idea_rows[:8])
     core.put('writing_topic',topic)
    elif existing['stage'] in ['topic','framework']:
     # A daily suggestion may already exist before the learner picks an opening.
@@ -87,16 +88,20 @@ def attach(app,core):
     changes={'method_selected':True,'confirmed':True,'method_choices':choices}
     prepared=existing.get('prepared_script');rebound=False
     if choices!=old_choices and isinstance(prepared,dict) and prepared.get('material_signature'):
-     feedback=[x for x in core.listing('writing_feedback') if x.get('profile_id')==p['id']][:8];refs=[x for x in core.listing('idea') if x.get('profile_id')==p['id']][:8]
+     feedback=[x for x in core.listing('writing_feedback') if x.get('profile_id')==p['id']][:8];idea_rows=[x for x in core.listing('idea') if x.get('profile_id')==p['id']];refs=idea_rows[:8]
      prior_contexts=[request_context(core.ROOT,m,existing,feedback,refs,source_binding=b) for b in [True,False]]
      norm=lambda value:re.sub(r'\s+','',str(value)).rstrip('。！？!?')
      opening=state.get('opening','');first=next((x.get('text','') for x in prepared.get('parts',[]) if x.get('key')=='opening'),'')
      same_opening=bool(norm(opening) and norm(first).startswith(norm(opening)) and any(norm(opening)==norm(value) for value in source_strings(a['content'])))
      topic_only=not opening and not state.get('method')
-     if prepared['material_signature'] in [c['material_signature'] for c in prior_contexts] and (same_opening or topic_only):
+     fits=[prepared_draft_status(prepared,c,historical_ideas=idea_rows) for c in prior_contexts]
+     fit=next((item for item in fits if item['applies']),None)
+     if fit and (same_opening or topic_only):
       try:
        updated_context=request_context(core.ROOT,m,{**existing,**changes},feedback,refs)
-       changes['prepared_script']=validate_result(prepared,updated_context)
+       rebound_script=validate_result(prepared,updated_context)
+       if fit.get('reference_titles') is not None:rebound_script['reference_titles']=fit['reference_titles']
+       changes['prepared_script']=rebound_script
        changes['prepared_binding_note']='同一当前资料、同题且开头与原卡一致；只更新选择来源，保留原生成者。'
        changes['draft_bind_warning']='';rebound=True
       except ValueError as error:

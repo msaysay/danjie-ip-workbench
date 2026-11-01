@@ -105,12 +105,67 @@ def material_context(memory,topic_title=None,*,source_binding=True):
  if len(json.dumps(result,ensure_ascii=False))>160000:raise ValueError('已有作业文字较多，请让WorkBuddy先整理本次写稿材料；原件仍保留')
  return result
 
+REFERENCE_HINT='有新参考，可让 WorkBuddy 重写一版'
+HOMEWORK_CHECKS=[
+ ('客群卡','客群卡',('客群卡',)),
+ ('人设卡','人设卡',('人设卡',)),
+ ('开头','当头一棒或开场八式',('当头一棒','开场八式')),
+ ('支撑','以理服人',('以理服人',)),
+ ('实力原句','亮出绝活',('亮出绝活',)),
+ ('收尾','指条明路',('指条明路',)),
+]
+
+def reference_projection(references):
+ return [{'title':x.get('title',''),'url':x.get('url',''),'notes':x.get('notes','')} for x in references or []]
+
+def reference_sources(references):
+ rows=[]
+ for item in references or []:
+  title=str(item.get('title') or '').strip()
+  if not title:continue
+  rows.append({'id':str(item.get('id') or '')[:80],'title':title[:80]})
+ return rows[:8]
+
+def homework_usage(memory):
+ modules={a.get('module') for a in (memory or {}).get('assets',[]) if a.get('module')}
+ return [{'key':key,'label':label,'ready':any(name in modules for name in needed)} for key,label,needed in HOMEWORK_CHECKS]
+
 def request_context(root,memory,topic,feedback=(),references=(),*,source_binding=True):
- context={'method':source_contract(root),'memory':material_context(memory,topic.get('title'),source_binding=source_binding),'topic':{k:topic.get(k) for k in ['id','title','audience','needs']},'revision_requests':[{'direction':x.get('direction',''),'status':'待验证的改稿方向，不是客户事实'} for x in feedback],'references':[{'title':x.get('title',''),'url':x.get('url',''),'notes':x.get('notes','')} for x in references]}
+ context={'method':source_contract(root),'memory':material_context(memory,topic.get('title'),source_binding=source_binding),'topic':{k:topic.get(k) for k in ['id','title','audience','needs']},'revision_requests':[{'direction':x.get('direction',''),'status':'待验证的改稿方向，不是客户事实'} for x in feedback],'references':reference_projection(references)}
  context['topic']['saved_revision_notes']=[h['note'] for h in topic.get('history',[]) if h.get('action')=='script' and h.get('note')][-6:]
  if topic.get('method_choices'):context['topic']['method_choices']=topic['method_choices']
- context['material_signature']=digest(context)
+ # Saved inspiration is advisory. It stays in the payload for the writer, but keeping or removing one must not invalidate a draft already prepared from the homework.
+ context['material_signature']=digest({k:v for k,v in context.items() if k!='references'})
  return context
+
+def prepared_draft_status(prepared,context,historical_ideas=()):
+ """Whether a draft WorkBuddy or Codex already wrote can still be used.
+
+ Homework, the topic, revision notes, and method choices still have to match.
+ A difference that is only the saved inspiration list does not block the draft.
+ """
+ if not isinstance(prepared,dict) or not prepared.get('material_signature') or not isinstance(prepared.get('script'),str) or not prepared.get('script').strip():
+  return {'applies':False,'hint':'','reference_titles':None}
+ stored=prepared['material_signature']
+ current=reference_projection(context.get('references'))
+ recorded=prepared.get('reference_titles')
+ if stored==context.get('material_signature'):
+  titles=list(recorded) if isinstance(recorded,list) else [x.get('title','') for x in current]
+  hint=REFERENCE_HINT if isinstance(recorded,list) and list(recorded)!=[x.get('title','') for x in current] else ''
+  return {'applies':True,'hint':hint,'reference_titles':titles}
+ def legacy(references):
+  payload={k:v for k,v in context.items() if k!='material_signature'}
+  payload['references']=reference_projection(references)
+  return digest(payload)
+ ideas=list(historical_ideas or [])
+ windows=[ideas[start:start+8] for start in range(0,min(len(ideas),24)+1)]
+ if [] not in windows:windows.append([])
+ for window in windows:
+  if legacy(window)!=stored:continue
+  titles=[x.get('title','') for x in reference_projection(window)]
+  hint='' if reference_projection(window)==current else REFERENCE_HINT
+  return {'applies':True,'hint':hint,'reference_titles':titles}
+ return {'applies':False,'hint':'','reference_titles':None}
 
 def homework_version(root,memory):return digest({'method':source_contract(root),'memory':material_context(memory)})
 
@@ -127,6 +182,6 @@ def validate_result(result,context):
  if not isinstance(plan.get('source_shas'),list) or not plan['source_shas'] or any(not isinstance(sha,str) or sha not in known for sha in plan['source_shas']):raise ValueError('写稿引用与本次题目的作业不一致，请只填写本题上下文里的 sha256 后重写')
  if plan.get('muscle_state')=='identity_only' and re.search(r'\d',parts[2]['text']):raise ValueError('身份句里出现了没有来源的成绩数字，原稿已保留')
  if plan.get('ending_method')=='给入口' and not plan.get('public_entry_quotes'):raise ValueError('还没有可公开的实际入口，不能编报名或私信领取')
- return {'version':VERSION,'material_signature':context['material_signature'],'script':script.strip(),'parts':parts,'plan':plan,'generated_by':str(result.get('generated_by','写作模型'))[:100]}
+ return {'version':VERSION,'material_signature':context['material_signature'],'script':script.strip(),'parts':parts,'plan':plan,'reference_titles':[x.get('title','') for x in context.get('references') or []],'generated_by':str(result.get('generated_by','写作模型'))[:100]}
 
 OUTPUT='''返回JSON：{script:"整篇自然口播，段落有衔接，无框架标题或后台说明",parts:[{key:"opening",label:"开头",skill:"03或07",text:"本稿实际开头"},{key:"reason",label:"支撑",skill:"04",text:"本稿支撑"},{key:"identity",label:"肌肉句或身份",skill:"05",text:"本稿本人介绍"},{key:"ending",label:"收尾",skill:"06",text:"本稿唯一收尾"}],plan:{opening_method:"实际选法",proof_method:"实际选法",proof_state:"documented|method_only|hypothetical",muscle_state:"homework_sentence|identity_only",muscle_gaps:[],ending_method:"五种之一",source_shas:["本题上下文 current_assets 的 sha256"],public_entry_quotes:[]}}。不要假装用户已确认，不在正文附采访问题或技术流程。'''
