@@ -3,7 +3,7 @@ import hashlib,json,os,re
 from pathlib import Path
 from fastapi import Request,HTTPException
 from classroom_research import validate_config,ROUTES,PLATFORMS
-from danjie_writing import material_context,RULES
+from danjie_writing import material_context,RULES,request_context,prepared_draft_status,homework_usage,reference_sources
 
 def interpret_interest(text):
  text=str(text).strip()
@@ -49,9 +49,29 @@ def attach(app,core):
   p=core.get('project',pid);m=next((s for s in p.get('sources',[]) if s.get('kind')=='business_memory'),None)
   if not m:raise HTTPException(400,'先建立自己的业务资料')
   return p,m
+ def decorate(pid,topics):
+  homework=[]
+  if not pid:return topics,homework
+  try:_,memory=profile(pid)
+  except HTTPException:return topics,homework
+  homework=homework_usage(memory)
+  feedback=[x for x in core.listing('writing_feedback') if x.get('profile_id')==pid][:8]
+  ideas=[x for x in core.listing('idea') if x.get('profile_id')==pid]
+  decorated=[]
+  for topic in topics:
+   row=dict(topic);prepared=row.get('prepared_script')
+   if isinstance(prepared,dict) and prepared.get('script'):
+    try:
+     ctx=request_context(core.ROOT,memory,row,feedback,ideas[:8])
+     hint=prepared_draft_status(prepared,ctx,historical_ideas=ideas)['hint']
+    except (ValueError,OSError):hint=''
+    if hint:row['reference_hint']=hint
+   decorated.append(row)
+  return decorated,homework
  @app.get('/api/workflow')
  def state():
-  settings=active();pid=settings.get('profile_id');return {'settings':settings,'topics':[t for t in core.listing('writing_topic') if t.get('profile_id')==pid],'model_connected':bool(os.getenv('WORKBENCH_MODEL_BASE_URL') and os.getenv('WORKBENCH_MODEL'))}
+  settings=active();pid=settings.get('profile_id');topics=[t for t in core.listing('writing_topic') if t.get('profile_id')==pid];topics,homework=decorate(pid,topics)
+  return {'settings':settings,'topics':topics,'homework':homework,'model_connected':bool(os.getenv('WORKBENCH_MODEL_BASE_URL') and os.getenv('WORKBENCH_MODEL'))}
  @app.post('/api/workflow/demo')
  def demo():
   raise HTTPException(409,'学员版不带老师演练资料，请先建立自己的业务。')
@@ -85,7 +105,8 @@ def attach(app,core):
    result=call_model(RULES+'\n按客户卡的需求顾虑选每日题目，不拿人设、外部参考或复盘推测代替客户事实。优先用已保存三圈候选，复盘方向只作待验证的写法，不照搬别人的经历、成绩或联系入口。返回 {topics:[{title,audience,reason,needs,framework:[{key,label,text,skill}]}]}。framework在后台安排opening开头（03或07）、reason支撑（04）、identity肌肉句（05，缺成绩只用真实职责）、ending单一收尾（06）；不把关注方向写成本人成绩。标题具体可讨论，恰好'+str(s['count'])+'题。所有是草稿，未提供的经历写待补。',{'memory':writing_context(m),'writing_feedback':[{'direction':x['direction'],'status':'待验证，不能当已证实原因'} for x in core.listing('writing_feedback') if x.get('profile_id')==s['profile_id']][:8],'saved_references':[{'title':x['title'],'url':x.get('url',''),'notes':x.get('notes','')} for x in core.listing('idea') if x.get('profile_id')==s['profile_id']][:8],'recent_titles':[t['title'] for t in core.listing('writing_topic') if t.get('profile_id')==s['profile_id']][:30]})
    rows=result.get('topics',[])
    if len(rows)!=s['count'] or any(not t.get('title') or len(t.get('framework',[]))!=4 for t in rows):raise ValueError('写作结果不完整，旧题目保留，请稍后再试')
-   for t in rows:core.put('writing_topic',{**t,'id':core.uid(),'profile_id':s['profile_id'],'stage':'topic','script':'','history':[],'confirmed':False,'demo':m['mode']=='fictional_demo','generated_by':os.getenv('WORKBENCH_MODEL'),'created':core.now()})
+   sources=reference_sources([x for x in core.listing('idea') if x.get('profile_id')==s['profile_id']][:8])
+   for t in rows:core.put('writing_topic',{**t,'id':core.uid(),'profile_id':s['profile_id'],'stage':'topic','script':'','history':[],'confirmed':False,'demo':m['mode']=='fictional_demo','generated_by':os.getenv('WORKBENCH_MODEL'),'source_references':sources,'created':core.now()})
    return {'topics':len(rows)}
   if not os.getenv('WORKBENCH_MODEL'):raise HTTPException(409,'自动写作模型还没有连接。本次演练已有5道AI草题，先选一题往下走。')
   return core.job('为我写选题建议','daily-topics',work)
@@ -113,6 +134,29 @@ def attach(app,core):
    else:raise HTTPException(400,'请选择下一步')
    history.append({'at':core.now(),'action':action,'note':str(d.get('note',''))[:2000],'before':{k:t.get(k) for k in ['stage','script','framework']}})
    return core.patch('writing_topic',ident,{**changes,'history':history})
+ def suggest_publish_copy(topic):
+  """Editable title, description, and tags taken from the confirmed script. Nothing is published."""
+  title=str(topic.get('title') or '').strip()
+  script=str(topic.get('script') or '').strip()
+  short=(title or script)[:30]
+  desc=script
+  if len(desc)>180:
+   cut=max(desc.rfind('。',0,180),desc.rfind('！',0,180),desc.rfind('？',0,180))
+   desc=desc[:cut+1] if cut>=40 else desc[:180].rstrip()+'…'
+  chunks=[part.strip() for part in re.split(r'[,，。！？、\s]+',title) if part.strip()]
+  tags=[part[:12] for part in chunks if len(part)>=2][:3]
+  if not tags and title:tags=[title[:12]]
+  copy={'title':short,'desc':desc,'tags':','.join(tags)}
+  return {'douyin':dict(copy),'tencent':dict(copy)}
+ @app.post('/api/workflow/topics/{ident}/publish-draft')
+ def publish_draft(ident:str):
+  t=core.get('writing_topic',ident);settings=active()
+  if t.get('profile_id')!=settings.get('profile_id'):raise HTTPException(409,'这条选题不属于当前业务，请重新打开')
+  if t.get('stage')!='ready' or not str(t.get('script') or '').strip():raise HTTPException(409,'先确认这一版脚本，再去发布上传')
+  existing=next((p for p in core.listing('project') if p.get('writing_topic_id')==ident and not any(s.get('kind')=='business_memory' for s in p.get('sources') or [])),None)
+  if existing:return existing
+  fields=suggest_publish_copy(t)
+  return core.put('project',{'id':core.uid(),'title':fields['douyin']['title'] or t['title'][:200],'brief':'来自已确认选题。成片在外部剪好后上传。','script':t['script'],'sources':[],'status':'待发布','segments':[],'platform_copy':fields,'writing_topic_id':ident,'writing_topic_title':str(t.get('title') or '')[:200],'created':core.now()})
  @app.get('/api/workflow/topics/{ident}/storycue')
  def storycue(ident:str):
   t=core.get('writing_topic',ident)

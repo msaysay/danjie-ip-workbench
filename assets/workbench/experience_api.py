@@ -6,7 +6,7 @@ from fastapi import HTTPException,Request
 from starlette.concurrency import run_in_threadpool
 from review_engine import build_review,DEFAULTS,ZONE
 from memory_limits import MAX_PROFILE_BYTES
-from danjie_writing import request_context,validate_result,homework_version,handoff_format,material_context,RULES,OUTPUT,VERSION as WRITING_VERSION
+from danjie_writing import request_context,validate_result,homework_version,handoff_format,material_context,reference_sources,prepared_draft_status,RULES,OUTPUT,VERSION as WRITING_VERSION
 
 def running_api_base():
  import os
@@ -105,14 +105,16 @@ def attach(app,core):
    if t.get('profile_id')!=p['id']:raise HTTPException(409,'这条选题不属于当前业务，请重新打开本次选题')
    if d.get('expected_revision')!=t.get('revision'):raise HTTPException(409,'这条选题有新修改，请重新打开再确认')
    if t.get('stage') in ['script','ready'] and not d.get('rewrite'):return t
-  feedback=[x for x in core.listing('writing_feedback') if x.get('profile_id')==p['id']][:8];refs=[x for x in core.listing('idea') if x.get('profile_id')==p['id']][:8]
+  feedback=[x for x in core.listing('writing_feedback') if x.get('profile_id')==p['id']][:8];ideas=[x for x in core.listing('idea') if x.get('profile_id')==p['id']];refs=ideas[:8]
   context=request_context(core.ROOT,m,t,feedback,refs);prepared=t.get('prepared_script')
   from workflow_api import call_model
   def checked(value):
    try:return validate_result(value,context)
    except ValueError as e:raise HTTPException(409,str(e)) from None
-  if prepared and prepared.get('material_signature')==context['material_signature']:
+  draft_status=prepared_draft_status(prepared,context,historical_ideas=ideas) if isinstance(prepared,dict) else {'applies':False}
+  if prepared and draft_status.get('applies'):
    result=checked(prepared)
+   if draft_status.get('reference_titles') is not None:result['reference_titles']=draft_status['reference_titles']
   elif __import__('os').getenv('WORKBENCH_MODEL_BASE_URL') and __import__('os').getenv('WORKBENCH_MODEL'):
    try:result=checked(await run_in_threadpool(call_model,context['method']['rules']+'\n'+OUTPUT,context))
    except ValueError as e:raise HTTPException(409,'本次写稿没有返回完整结果，原稿已保留') from None
@@ -128,7 +130,7 @@ def attach(app,core):
    raise HTTPException(409,'这题的已有作业和蛋蛋写法已备好。当前还没接到新的写稿结果，请让 WorkBuddy 或 Codex 按共享文件夹里的选题回传格式接着本题写稿；不会把旧提纲拼接成新生成的稿。')
   with core.LOCK:
    current_p,current_m=active_profile()
-   current_feedback=[x for x in core.listing('writing_feedback') if x.get('profile_id')==p['id']][:8];current_refs=[x for x in core.listing('idea') if x.get('profile_id')==p['id']][:8]
+   current_feedback=[x for x in core.listing('writing_feedback') if x.get('profile_id')==p['id']][:8];current_ideas=[x for x in core.listing('idea') if x.get('profile_id')==p['id']];current_refs=current_ideas[:8]
    if not current_m or current_p['id']!=p['id'] or core.get('writing_topic',ident)['revision']!=t['revision'] or request_context(core.ROOT,current_m,t,current_feedback,current_refs)['material_signature']!=context['material_signature']:raise HTTPException(409,'写稿期间资料有了修改，旧稿已保留，请按当前资料重写')
    history=list(t.get('history',[]));history.append({'at':core.now(),'action':'danjie_draft','note':'按已有蛋蛋作业组织完整脚本，旧稿保留，整稿待核对','before':{'stage':t['stage'],'script':t.get('script',''),'framework':t.get('framework',[])}})
    return core.patch('writing_topic',ident,{'confirmed':True,'stage':'script','script':result['script'],'framework':result['parts'],'writing_plan':result['plan'],'history':history,'draft_basis':WRITING_VERSION,'draft_sources':context['method']['sources'],'draft_material_signature':context['material_signature'],'draft_generated_by':result['generated_by']})
@@ -298,6 +300,7 @@ def attach(app,core):
        for item in normalized:
         if item.get('prepared_script_raw'):validate_result(item['prepared_script_raw'],request_context(core.ROOT,next_memory,item))
       semantic=core.digest({'date':date,'topics':normalized})
+      kept_ideas=[x for x in core.listing('idea') if x.get('profile_id')==p['id']];kept_refs=kept_ideas[:8]
       if semantic!=link.get('topic_content_sha'):
        for t in normalized:
         with core.LOCK:
@@ -307,8 +310,9 @@ def attach(app,core):
          raw_draft=t.pop('prepared_script_raw',None);t['prepared_script']=None
          if raw_draft:
           if data.get('writing_material_version')!=homework_version(core.ROOT,next_memory):raise ValueError('作业有了新版本，请按当前资料写稿')
-          ctx=request_context(core.ROOT,next_memory,{**(previous or {}),**t,'id':target_id},[x for x in core.listing('writing_feedback') if x.get('profile_id')==p['id']][:8],[x for x in core.listing('idea') if x.get('profile_id')==p['id']][:8])
+          ctx=request_context(core.ROOT,next_memory,{**(previous or {}),**t,'id':target_id},[x for x in core.listing('writing_feedback') if x.get('profile_id')==p['id']][:8],kept_refs)
           t['prepared_script']=validate_result(raw_draft,ctx)
+          t['source_references']=reference_sources(kept_refs)
          same_frames=previous and [{k:x.get(k) for k in ['key','label','skill','text']} for x in previous.get('framework',[])]==[{k:x.get(k) for k in ['key','label','skill','text']} for x in t['framework']]
          if previous and same_frames and all(previous.get(k)==t[k] for k in ['audience','reason','needs','prepared_script']):continue
          if previous and ((previous['stage']=='topic' and not previous.get('confirmed')) or can_fill_selected):
