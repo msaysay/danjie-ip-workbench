@@ -8,7 +8,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import server as s
 import storycue_api
 import requests
-from fake_storycue import FakeStoryCue
+from fake_storycue import FakeStoryCue, canonical_framework as fake_canonical
+
+OURS = ['观点破题', '四维信任', '方法直给', '痛点解答', '情绪共鸣', '人物故事', '现场探访', '决策问答']
+ALIASES = {
+    '北极星': '观点破题',
+    '四喜': '四维信任',
+    '抄近路': '方法直给',
+    '消费心理': '痛点解答',
+    '情绪': '情绪共鸣',
+    '业务传记': '人物故事',
+    '云参访': '现场探访',
+    '业务硬控': '决策问答',
+}
+HIDDEN = [name for name in ALIASES if name != '情绪']
 
 SPEECH = 'vk-storycue-speech-DO-NOT-LEAK'
 TEXT = 'vk-storycue-text-DO-NOT-LEAK'
@@ -196,14 +209,29 @@ class StoryCueHandoffTests(unittest.TestCase):
         self.assertLessEqual(len(background), 1200)
         self.assertIn('开头', background)
         self.assertIn('支撑', background)
-        self.assertEqual(storycue_api.suggest_framework(topic)['id'], '抄近路')
+        suggestion = storycue_api.suggest_framework(topic)
+        self.assertEqual(suggestion['id'], '方法直给')
+        self.assertEqual(suggestion['name'], '方法直给')
+        self.assertNotIn('抄近路', suggestion['reason'])
         plain = self.ready('先别按别人的结论开口。\n\n核对方法只有一条。\n\n我是测试学员。\n\n把缺口留空。')
-        self.assertEqual(storycue_api.suggest_framework(plain)['id'], '北极星')
+        plain_suggestion = storycue_api.suggest_framework(plain)
+        self.assertEqual(plain_suggestion['id'], '观点破题')
+        self.assertEqual(plain_suggestion['name'], '观点破题')
+        for old, new in ALIASES.items():
+            self.assertEqual(storycue_api.canonical_framework(old), new)
+            self.assertEqual(storycue_api.canonical_framework(new), new)
+            self.assertEqual(storycue_api.storycue_wire_framework(new), old)
+            self.assertEqual(storycue_api.storycue_wire_framework(old), old)
+            self.assertEqual(fake_canonical(old), new)
         self.use_directory()
         before = s.get('writing_topic', 'topic1')['revision']
         sent = self.post('/workflow/topics/topic1/storycue/handoff', {'framework': '北极星'})
         self.assertEqual(sent.status_code, 200, sent.text)
         body = sent.json()
+        self.assertEqual(body['framework'], '观点破题')
+        for old in HIDDEN:
+            self.assertNotIn(old, sent.text)
+        self.assertEqual(self.fake.last_inbound_framework, '北极星')
         self.assertEqual(body['handoffId'], 'topic1-' + str(before))
         self.assertEqual(body['scriptSha256'], storycue_api.script_sha256(plain['script']))
         self.assertLessEqual(body['backgroundChars'], 1200)
@@ -211,6 +239,11 @@ class StoryCueHandoffTests(unittest.TestCase):
         self.assertTrue(body['openUrl'].endswith('/trial?handoff=' + body['handoffId']))
         self.assertEqual(s.get('writing_topic', 'topic1')['revision'], before)
         stored = json.loads((self.fake.handoffs / (body['handoffId'] + '.json')).read_text(encoding='utf-8'))
+        self.assertEqual(stored['framework'], '观点破题')
+        page = requests.get(body['openUrl'], timeout=5)
+        self.assertEqual(page.status_code, 200, page.text)
+        self.assertIn('观点破题', page.text)
+        self.assertNotIn('北极星', page.text)
         self.assertTrue(stored['createdAt'].endswith('Z'))
         self.assertEqual(stored['schema'], 'danjie.storycue-handoff.v1')
         self.assertLessEqual(len(stored['background']), 1200)
@@ -227,8 +260,14 @@ class StoryCueHandoffTests(unittest.TestCase):
         self.assertIn('缺的材料继续留空', pulled.text)
         self.assertTrue(pulled.json()['demo'])
         self.assertTrue(pulled.json()['interview']['demo'])
-        panel = self.client.get('/api/workflow/topics/topic1/storycue/panel').json()
-        self.assertEqual(panel['interview']['entries'][1]['role'], '嘉宾')
+        panel = self.client.get('/api/workflow/topics/topic1/storycue/panel')
+        panel_body = panel.json()
+        self.assertEqual(panel_body['interview']['entries'][1]['role'], '嘉宾')
+        self.assertEqual(panel_body['interview']['framework'], '观点破题')
+        self.assertEqual([item['id'] for item in panel_body['frameworks']], OURS)
+        self.assertTrue(all(item['name'] == item['id'] for item in panel_body['frameworks']))
+        for old in HIDDEN:
+            self.assertNotIn(old, panel.text)
         s.patch('writing_topic', 'topic1', {'script': plain['script'] + '\n\n这句话把确认稿改掉了。', 'stage': 'ready'})
         rejected = self.post('/workflow/topics/topic1/storycue/result/pull', {})
         self.assertEqual(rejected.status_code, 409)
@@ -249,6 +288,20 @@ class StoryCueHandoffTests(unittest.TestCase):
         demo_rejected = self.post('/workflow/topics/topic1/storycue/result', unmarked)
         self.assertEqual(demo_rejected.status_code, 400)
         self.assertIn('demo', demo_rejected.text)
+        aliased = dict(result)
+        aliased['framework'] = '云参访'
+        aliased['demo'] = True
+        aliased['topicId'] = 'topic1'
+        aliased['scriptSha256'] = storycue_api.script_sha256(s.get('writing_topic', 'topic1')['script'])
+        accepted = self.post('/workflow/topics/topic1/storycue/result', aliased)
+        self.assertEqual(accepted.status_code, 200, accepted.text)
+        self.assertEqual(accepted.json()['interview']['framework'], '现场探访')
+        self.assertNotIn('云参访', accepted.text)
+        with s.connect() as db:
+            db.execute('UPDATE storycue_link SET framework=? WHERE topic_id=?', ('业务硬控', 'topic1'))
+        legacy_panel = self.client.get('/api/workflow/topics/topic1/storycue/panel')
+        self.assertEqual(legacy_panel.json()['handoff']['framework'], '决策问答')
+        self.assertNotIn('业务硬控', legacy_panel.text)
 
     def test_sayframe_payload_includes_interview_only_when_present(self):
         topic = self.ready('课堂演练的确认稿。')
@@ -256,25 +309,29 @@ class StoryCueHandoffTests(unittest.TestCase):
         self.assertEqual(empty['schema'], 'danjie.sayframe-handoff.v1')
         self.assertIsNone(empty['interview'])
         self.assertEqual(empty['script'], topic['script'])
-        self.assertEqual(empty['framework'], '北极星')
+        self.assertEqual(empty['framework'], '观点破题')
         self.assertEqual(empty['mediaPath'], '')
         interview = {'schema': 'storycue.interview-export.v1', 'framework': '四喜', 'topicId': topic['id'], 'demo': True}
         full = storycue_api.assemble_sayframe_handoff(topic, interview)
-        self.assertEqual(full['interview']['framework'], '四喜')
+        self.assertEqual(full['framework'], '四维信任')
+        self.assertEqual(full['interview']['framework'], '四维信任')
+        self.assertEqual(interview['framework'], '四喜')
         self.assertEqual(full['script'], topic['script'])
         self.assertNotIn('http', json.dumps(full))
+        for old in HIDDEN:
+            self.assertNotIn(old, json.dumps(full, ensure_ascii=False))
 
     def test_topic_id_and_overlong_script_are_rejected_before_storycue(self):
         self.profile()
         s.put('writing_topic', {'id': '-bad', 'title': '编号不合格', 'audience': '学员', 'framework': [], 'script': '确认稿', 'stage': 'ready', 'confirmed': True, 'demo': True, 'history': [], 'profile_id': 'p', 'created': s.now()})
         self.use_directory()
-        rejected = self.post('/workflow/topics/-bad/storycue/handoff', {'framework': '北极星'})
+        rejected = self.post('/workflow/topics/-bad/storycue/handoff', {'framework': '观点破题'})
         self.assertEqual(rejected.status_code, 400)
         self.assertIn('字母、数字', rejected.text)
         self.assertFalse(list(self.fake.handoffs.glob('*.json')))
         huge = '稿' * 100_001
         s.put('writing_topic', {'id': 'huge1', 'title': '太长', 'audience': '学员', 'framework': [{'key': 'opening', 'label': '开头', 'skill': '03', 'text': '开头'}, {'key': 'reason', 'label': '支撑', 'skill': '04', 'text': '支撑'}, {'key': 'identity', 'label': '身份', 'skill': '05', 'text': '身份'}, {'key': 'ending', 'label': '收尾', 'skill': '06', 'text': '收尾'}], 'script': huge, 'stage': 'ready', 'confirmed': True, 'demo': True, 'history': [], 'profile_id': 'p', 'created': s.now()})
-        too_long = self.post('/workflow/topics/huge1/storycue/handoff', {'framework': '北极星'})
+        too_long = self.post('/workflow/topics/huge1/storycue/handoff', {'framework': '观点破题'})
         self.assertEqual(too_long.status_code, 413, too_long.text)
         self.assertIn('100000', too_long.text)
         self.assertFalse((self.fake.handoffs / 'huge1-1.json').exists())
@@ -283,7 +340,7 @@ class StoryCueHandoffTests(unittest.TestCase):
         self.profile()
         s.put('writing_topic', {'id': 'draft1', 'title': '还没确认', 'audience': '学员', 'framework': [], 'script': '草稿', 'stage': 'script', 'confirmed': False, 'demo': True, 'history': [], 'profile_id': 'p', 'created': s.now()})
         self.use_directory()
-        response = self.post('/workflow/topics/draft1/storycue/handoff', {'framework': '北极星'})
+        response = self.post('/workflow/topics/draft1/storycue/handoff', {'framework': '观点破题'})
         self.assertEqual(response.status_code, 409)
         self.assertIn('先确认', response.text)
 

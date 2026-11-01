@@ -1,15 +1,22 @@
 /** Shared StoryCue wizard and interview display rules. No Key values are kept here. */
 
 export const FRAMEWORKS = [
-  ['北极星', '观点破题', '用不同判断开场，以原话和证据讲清道理'],
-  ['四喜', '四维信任', '兼顾破圈、人设、专业与转化'],
-  ['抄近路', '方法直给', '讲清方法步骤，用具体例子帮助理解'],
-  ['消费心理', '痛点解答', '从客户问题讲到答案、依据与下一步'],
-  ['情绪', '情绪共鸣', '从一个真实瞬间和感受切入'],
-  ['业务传记', '人物故事', '用与业务有关的经历、选择和转折建立信任'],
-  ['云参访', '现场探访', '按客户关心的顺序串起可拍的现场'],
-  ['业务硬控', '决策问答', '围绕选择前的疑虑做一问一答'],
+  ['观点破题', '观点破题', '用不同判断开场，以原话和证据讲清道理'],
+  ['四维信任', '四维信任', '兼顾破圈、人设、专业与转化'],
+  ['方法直给', '方法直给', '讲清方法步骤，用具体例子帮助理解'],
+  ['痛点解答', '痛点解答', '从客户问题讲到答案、依据与下一步'],
+  ['情绪共鸣', '情绪共鸣', '从一个真实瞬间和感受切入'],
+  ['人物故事', '人物故事', '用与业务有关的经历、选择和转折建立信任'],
+  ['现场探访', '现场探访', '按客户关心的顺序串起可拍的现场'],
+  ['决策问答', '决策问答', '围绕选择前的疑虑做一问一答'],
 ];
+
+const FRAMEWORK_LABELS = new Set(FRAMEWORKS.map(item => item[1]));
+
+export function frameworkLabel(value) {
+  const text = String(value || '').trim();
+  return FRAMEWORK_LABELS.has(text) ? text : '';
+}
 
 export const DESKTOP_COMMANDS = {
   connectWorkbuddy: 'npm run desktop:connect -- --host workbuddy',
@@ -83,7 +90,7 @@ export function formatInterview(interview) {
   const advice = interview.editingAdvice && typeof interview.editingAdvice === 'object' ? interview.editingAdvice : null;
   return {
     demo: !!interview.demo,
-    framework: interview.framework || '',
+    framework: frameworkLabel(interview.framework),
     focus: interview.plan?.focus || '',
     questions: Array.isArray(interview.plan?.questions) ? interview.plan.questions.map(q => ({label: q.label || '', question: q.question || '', notes: q.notes || ''})) : [],
     entries: Array.isArray(interview.entries) ? interview.entries.filter(e => !e?.provisional).map(e => ({role: e.role || '', text: e.text || '', at: e.at || ''})) : [],

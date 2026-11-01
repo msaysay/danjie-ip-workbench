@@ -12,8 +12,25 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-FRAMEWORKS = ['北极星', '四喜', '抄近路', '消费心理', '情绪', '业务传记', '云参访', '业务硬控']
+FRAMEWORKS = ['观点破题', '四维信任', '方法直给', '痛点解答', '情绪共鸣', '人物故事', '现场探访', '决策问答']
+_LEGACY_FRAMEWORK_IDS = {
+    '北极星': '观点破题',
+    '四喜': '四维信任',
+    '抄近路': '方法直给',
+    '消费心理': '痛点解答',
+    '情绪': '情绪共鸣',
+    '业务传记': '人物故事',
+    '云参访': '现场探访',
+    '业务硬控': '决策问答',
+}
 TOPIC_ID = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_-]{0,80}$')
+
+
+def canonical_framework(value):
+    text = str(value or '').strip()
+    if text in FRAMEWORKS:
+        return text
+    return _LEGACY_FRAMEWORK_IDS.get(text, '')
 CREATED_AT = re.compile(r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$')
 FIELDS = {'speechKey': 'DOUBAO_API_KEY', 'textKey': 'RELAY_LLM_API_KEY', 'llmBaseUrl': 'RELAY_LLM_BASE_URL', 'llmModel': 'RELAY_LLM_MODEL', 'jevKey': 'TYPESAFE_API_KEY'}
 
@@ -34,6 +51,7 @@ class FakeStoryCue:
         token_path.write_text(self.token, encoding='utf-8')
         os.chmod(token_path, 0o600)
         self.auto_result = auto_result
+        self.last_inbound_framework = ''
         self._lock = threading.Lock()
         handler = self._handler()
         self.httpd = ThreadingHTTPServer(('127.0.0.1', port), handler)
@@ -230,7 +248,8 @@ class FakeStoryCue:
                     return
                 topic_id = data.get('topicId')
                 revision = data.get('revision')
-                framework = data.get('framework')
+                owner.last_inbound_framework = data.get('framework')
+                framework = canonical_framework(data.get('framework'))
                 script = data.get('script')
                 background = data.get('background')
                 if not isinstance(topic_id, str) or not TOPIC_ID.fullmatch(topic_id):
@@ -242,6 +261,7 @@ class FakeStoryCue:
                 if not isinstance(revision, int) or framework not in FRAMEWORKS:
                     self._json(400, {'ok': False, 'error': '选题、版本或框架不对'})
                     return
+                data = {**data, 'framework': framework}
                 if isinstance(script, str) and len(script) > 100_000:
                     self._json(413, {'ok': False, 'error': 'script 超过 100000 字。请由工作台压缩进不超过 1200 字的 background，StoryCue 不保存超长脚本。'})
                     return
@@ -284,7 +304,7 @@ class FakeStoryCue:
                     'topicId': saved.get('topicId'),
                     'revision': saved.get('revision'),
                     'title': saved.get('title'),
-                    'framework': saved.get('framework'),
+                    'framework': canonical_framework(saved.get('framework')),
                     'background': saved.get('background'),
                     'scriptSha256': saved.get('scriptSha256'),
                     'demo': saved.get('demo'),
@@ -322,7 +342,7 @@ class FakeStoryCue:
                 else:
                     saved = json.loads(path.read_text(encoding='utf-8'))
                     demo = '课堂演练，待本人核对。' if saved.get('demo') else '沿用已确认脚本。'
-                    body = f'<p>{_esc(demo)}</p><h1>{_esc(saved.get("title") or "")}</h1><p>框架：{_esc(saved.get("framework") or "")}</p><p>交接编号：{_esc(handoff_id)}</p>'
+                    body = f'<p>{_esc(demo)}</p><h1>{_esc(saved.get("title") or "")}</h1><p>框架：{_esc(canonical_framework(saved.get("framework")))}</p><p>交接编号：{_esc(handoff_id)}</p>'
                 page = f'<!doctype html><meta charset="utf-8"><title>StoryCue 访谈</title><main><p>StoryCue 已接到这次交接。这一页是本机约定检查用的替身，用来确认工作台打开了返回的地址。</p>{body}</main>'
                 raw = page.encode()
                 self.send_response(200)
