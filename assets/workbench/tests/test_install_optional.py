@@ -134,6 +134,17 @@ class InterpreterSelectionTests(unittest.TestCase):
         self.assertEqual(mod.interpreter_version(python), (3, 12, 4))
         self.assertNotIn("'-m', 'venv'", (self.root / 'py313.log').read_text(encoding='utf-8'))
 
+    def test_venv_directory_without_python_is_rebuilt(self):
+        base = self.fake('py312', '3.12.4')
+        folder = self.repo()
+        broken = folder / '.venv' / 'bin'
+        broken.mkdir(parents=True)
+        (broken / 'README').write_text('no interpreter', encoding='utf-8')
+        python = mod.ensure_venv(folder / '.venv', base, '>=3.10,<3.13')
+        self.assertTrue(python.is_file())
+        self.assertEqual(mod.interpreter_version(python), (3, 12, 4))
+        self.assertFalse((broken / 'README').exists())
+
     def test_compatible_venv_is_reused(self):
         base = self.fake('py-base', '3.12.1')
         folder = self.repo()
@@ -369,7 +380,35 @@ class PublisherHealthTests(unittest.TestCase):
 
     def test_missing_binary_is_not_ready(self):
         workbench_server.SAUPY = Path(self.temp.name) / 'missing' / 'bin' / 'python'
-        self.assertFalse(self.client.get('/api/health').json()['publisher'])
+        body = self.client.get('/api/health').json()
+        self.assertFalse(body['publisher'])
+        self.assertIn('请先安装发布器依赖', body['publisher_message'])
+        self.assertIn('install_optional.py publish', body['publisher_message'])
+        self.assertNotIn('发布器目录还在', body['publisher_message'])
+        state = self.client.get('/api/state').json()
+        self.assertFalse(state['publisher'])
+        self.assertIn('install_optional.py publish', state['publisher_message'])
+
+    def test_venv_directory_without_python_says_how_to_rebuild(self):
+        workbench_server.SAUPY = Path(self.temp.name) / '.venv' / 'bin' / 'python'
+        workbench_server.SAUPY.parent.parent.mkdir()
+        body = self.client.get('/api/health').json()
+        self.assertFalse(body['publisher'])
+        self.assertIn('发布器目录还在', body['publisher_message'])
+        self.assertIn('没有 Python', body['publisher_message'])
+        self.assertIn('删掉坏环境再重建', body['publisher_message'])
+        created = self.client.post(
+            '/api/accounts',
+            json={'platform': 'douyin', 'alias': 'acct_1', 'label': '测试'},
+            headers={'x-workbench-token': workbench_server.TOKEN},
+        )
+        denied = self.client.post(
+            '/api/accounts/' + created.json()['id'] + '/login',
+            headers={'x-workbench-token': workbench_server.TOKEN},
+        )
+        self.assertEqual(denied.status_code, 409)
+        self.assertIn('请先安装发布器依赖', denied.json()['detail'])
+        self.assertIn('没有 Python', denied.json()['detail'])
 
     def test_existing_python_without_the_package_is_not_ready(self):
         workbench_server.SAUPY = Path(sys.executable)

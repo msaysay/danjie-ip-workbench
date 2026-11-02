@@ -40,6 +40,23 @@ python scripts/dev.py serve
 
 开发界面时，在 `assets/workbench` 运行 `npm run dev`，另一个终端运行后端；Vite将 `/api` 转发给本机8766。首次业务可让WorkBuddy读取本仓库SKILL.md后，通过 `scripts/student_profile.py` 初始化本人的业务；不要从其他人的数据库复制。
 
+## 写稿登录和发布扫码
+
+这两件事不要混在一起。
+
+- 写稿：在设置「每天怎么帮我」里复制每日任务，或点「打开写稿窗口」。WorkBuddy 要在弹出的终端里选「国内站」并回车，浏览器才会出现。工作台不会在写稿页弹出抖音或视频号二维码。没有现成整稿时，生成脚本只会写好「待写脚本.md」，请回到 WorkBuddy 或 Codex 接着写。
+- 发布：抖音和视频号的扫码在「账号与内容查询」或发布页。它走发布器自己的浏览器，不走 WorkBuddy。
+
+发布器装在 `assets/workbench/vendor/social-auto-upload/.venv`。同步代码之后如果这个目录还在，但里面没有 `bin/python`（Windows 是 `Scripts/python.exe`），`/api/health` 的 `publisher` 是 false。页面上以前的「已登录」也不能再打开二维码。在运行包根目录执行：
+
+```sh
+python scripts/install_optional.py publish
+```
+
+这条命令会删掉坏掉的虚拟环境再重建，然后安装发布器和浏览器。需要联网。不会登录，也不会发布。`python scripts/dev.py prepare` 只展开框架，不安装发布器；发现坏环境时会打印上面这条命令。
+
+抖音和视频号没有「仅我自己可见」。输入「确认发布」会按平台默认范围发出。课堂里不要用真实账号试发。
+
 ## 检查
 
 ```sh

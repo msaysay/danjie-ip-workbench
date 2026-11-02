@@ -1,11 +1,12 @@
 import React from 'react';
+import {accountFacingStatus,publisherBlock} from './publishStatus.js';
 
 export const PF={douyin:'抖音',tencent:'视频号'};
 
 export function chars(value){return [...String(value??'')].length}
 
-export function accountState(status){
- return {已验证:'已登录',未验证:'还没登录',需重新验证:'需要重新登录'}[status]||status||'还没登录';
+export function accountState(status, publisherReady=true){
+ return accountFacingStatus(status, publisherReady);
 }
 
 export function titleProblem(title){
@@ -31,13 +32,15 @@ export function scheduleProblem(schedule){
  return '';
 }
 
-export function publishGaps({hasVideo,selectedIds,accounts,copyFor}){
+export function publishGaps({hasVideo,selectedIds,accounts,copyFor,publisherReady=true}){
  const gaps=[];
+ const blocked=publisherBlock(publisherReady);
+ if(blocked)gaps.push(blocked);
  if(!hasVideo)gaps.push({id:'video',text:'先上传剪好的视频'});
  if(!selectedIds.length)gaps.push({id:'account',text:'至少选一个要发的账号'});
  const chosen=selectedIds.map(id=>accounts.find(account=>account.id===id)).filter(Boolean);
  for(const account of chosen){
-  if(account.status!=='已验证')gaps.push({id:'login:'+account.id,text:'「'+account.label+'」还没登录成功，先扫码再发布'});
+  if(!blocked&&account.status!=='已验证')gaps.push({id:'login:'+account.id,text:'「'+account.label+'」还没登录成功，先扫码再发布'});
  }
  for(const platform of [...new Set(chosen.map(account=>account.platform).filter(key=>PF[key]))]){
   const copy=copyFor(platform)||{};
@@ -119,6 +122,7 @@ export function ConfirmPublishSummary({plan,accounts,projects,fileURL}){
  const project=projects.find(item=>item.id===plan.project);
  return <>
   <p>下面是这次真的会提交给平台的内容。看完后输入「确认发布」，才会发出。</p>
+  <p className="muted small">抖音和视频号没有「仅我自己可见」。确认之后按平台默认范围发出，课堂里不要用真实账号试。</p>
   <p className="muted small">视频文件：{project?.title||'已选成片'}</p>
   {plan.items.map((item,index)=>{
    const account=accounts.find(row=>row.id===item.account_id);

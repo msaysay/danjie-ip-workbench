@@ -121,8 +121,10 @@ def local_session():
 @app.get('/api/state')
 def state():
     projects=[{**p,'current_edit_hash':edit_hash(p),'output_current':bool(p.get('output') and (p['output'].get('kind')=='finished_video' or p['output'].get('edit_hash')==edit_hash(p)))} for p in listing('project')]
+    ready, message = publisher_snapshot()
     return {'token':TOKEN,'instance':INSTANCE,'data_revision':state_revision()['value'],'ideas':listing('idea'),'projects':projects,'feeds':listing('feed'),'accounts':listing('account'),
-            'jobs':listing('job')[:50],'batches':listing('batch'),'metrics':listing('metric'),'platforms':PUBLISH_PLATFORMS}
+            'jobs':listing('job')[:50],'batches':listing('batch'),'metrics':listing('metric'),'platforms':PUBLISH_PLATFORMS,
+            'publisher':ready,'publisher_message':message}
 
 @app.get('/api/revision')
 def state_revision():
@@ -437,7 +439,8 @@ def account_action(ident:str,action:str):
     a=get('account',ident)
     if a['platform']=='xiaohongshu': raise HTTPException(400,XHS_PUBLISH_BLOCKED)
     if action not in ['login','check']: raise HTTPException(404)
-    if not publisher_ready(): raise HTTPException(409,'请先安装发布器依赖')
+    ready, message = publisher_snapshot()
+    if not ready: raise HTTPException(409, message)
     def work(j):
         args=[SAUPY,SAU/'sau_cli.py',a['platform'],action,'--account',a['alias']]
         if action=='login': args+=['--headed']
@@ -577,10 +580,14 @@ def publication_plan(p, accounts):
 
 @app.post('/api/projects/{ident}/publish-plan')
 async def prepare_publish(ident:str,r:Request):
+    ready, message = publisher_snapshot()
+    if not ready: raise HTTPException(409, message)
     d=await r.json();plan=publication_plan(get('project',ident),d.get('accounts',[]));plan['id']=uid();plan['fingerprint']=digest(plan);plan['state']='prepared';plan['created']=now()
     return put('batch',plan)
 @app.post('/api/batches/{ident}/execute')
 async def execute_batch(ident:str,r:Request):
+    ready, message = publisher_snapshot()
+    if not ready: raise HTTPException(409, message)
     d=await r.json()
     with LOCK:
         batch=get('batch',ident)
@@ -684,10 +691,23 @@ def publisher_ready():
             env={**os.environ,'PYTHONUTF8':'1','PYTHONDONTWRITEBYTECODE':'1'},creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
     except (OSError,subprocess.TimeoutExpired): return False
     return done.returncode==0
+def publisher_gap_message():
+    repair='请在运行包根目录执行 python scripts/install_optional.py publish。若 .venv 目录还在但没有 Python，这条命令会删掉坏环境再重建。需要联网。不会登录，也不会发布。'
+    venv=SAUPY.parent.parent
+    if not SAUPY.is_file() and venv.name=='.venv' and venv.exists():
+        return '请先安装发布器依赖。发布器目录还在，但里面没有 Python。'+repair
+    if not SAUPY.is_file():
+        return '请先安装发布器依赖。'+repair
+    return '请先安装发布器依赖。环境在，但还不能导入发布器。'+repair
+def publisher_snapshot():
+    if not SAUPY.is_file(): return False, publisher_gap_message()
+    ready=publisher_ready()
+    return ready, ('' if ready else publisher_gap_message())
 @app.get('/api/health')
 def health():
+    ready, message = publisher_snapshot()
     return {'time':now(),'python':sys.version.split()[0],'ffmpeg':bool(shutil.which('ffmpeg')),'ffprobe':bool(shutil.which('ffprobe')),
-        'openfilm':OPENFILM.exists(),'openfilm_version':'0.2.6','publisher':publisher_ready(),
+        'openfilm':OPENFILM.exists(),'openfilm_version':'0.2.6','publisher':ready,'publisher_message':message,
         'model_connected':bool(os.getenv('WORKBENCH_MODEL_BASE_URL') and os.getenv('WORKBENCH_MODEL')),
         'accounts_verified':sum(a.get('status')=='已验证' for a in listing('account')),'data_dir':str(DATA),'listen':'127.0.0.1','edit_policy':EDIT_POLICY}
 
