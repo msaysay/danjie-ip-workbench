@@ -3,9 +3,14 @@
 StoryCue status and the writing-host wizard share this probe. It looks on PATH,
 common install directories, and the global npm packages `@openai/codex` and
 `@tencent-ai/codebuddy-code`. A missing CLI is a normal result.
+
+Opening a login window is separate: it starts a visible terminal. WorkBuddy's
+`codebuddy` command only opens a browser after the person picks a site in that
+window. This is not the Douyin or Channels QR login.
 """
 from __future__ import annotations
 
+import shlex
 import shutil
 import subprocess
 from pathlib import Path
@@ -114,3 +119,44 @@ def desktop_cli_location(*, which=None, home=None, npm_root=None, is_file=None, 
             'packageFound': package_found,
         })
     return {'hosts': hosts, 'npmRoot': str(npm_root_path or ''), 'npmError': npm_error}
+
+
+def login_launch_plan(host_id, command_path, platform):
+    """Plan a visible terminal for writing-host login. Does not start it."""
+    if host_id not in ('workbuddy', 'codex'):
+        return {'opened': False, 'argv': [], 'message': '请选择 WorkBuddy 或 Codex。这是写稿登录，不是抖音或视频号扫码。'}
+    command_path = str(command_path or '')
+    manual = 'codebuddy' if host_id == 'workbuddy' else 'codex login'
+    if not command_path:
+        return {
+            'opened': False,
+            'argv': [],
+            'message': f'还没找到命令。请自己打开终端，运行 {manual}。写稿登录不会出现在发布页的二维码里。',
+        }
+    if host_id == 'codex':
+        args = [command_path, 'login']
+        message = '已尝试打开 Codex 登录。浏览器由这条命令弹出。这不是抖音或视频号扫码。'
+    else:
+        args = [command_path]
+        message = '已尝试打开 WorkBuddy 的命令窗口。请选择「国内站」并回车，浏览器才会出现。选之前没有浏览器。这不是发布账号扫码。'
+    if platform == 'win32':
+        argv = ['cmd', '/c', 'start', '写稿登录', 'cmd', '/k', *args]
+    elif platform == 'darwin':
+        script = ' '.join(shlex.quote(part) for part in args)
+        escaped = script.replace('\\', '\\\\').replace('"', '\\"')
+        argv = ['osascript', '-e', f'tell application "Terminal" to do script "{escaped}"']
+    else:
+        quoted = ' '.join(shlex.quote(part) for part in args)
+        argv = ['x-terminal-emulator', '-e', 'bash', '-lc', quoted]
+    return {'opened': True, 'argv': argv, 'message': message}
+
+
+def start_login_window(argv, runner=None):
+    runner = runner or subprocess.Popen
+    return runner(
+        list(argv),
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )

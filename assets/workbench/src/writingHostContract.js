@@ -14,7 +14,7 @@ export const WRITING_HOSTS = {
     package: '@tencent-ai/codebuddy-code',
     installUrl: 'https://www.codebuddy.cn/docs/cli/installation',
     appUrl: 'https://www.codebuddy.cn/docs/workbuddy/From-Beginner-to-Expert-Guide/Function-Description/Automation-Guide',
-    open: '打开 WorkBuddy 并登录。还没安装就先装电脑版，或按说明安装命令行。',
+    open: '打开写稿窗口会弹出本机终端里的 codebuddy。请选择「国内站」并回车，浏览器才会出现。这不是发布账号扫码。',
   },
   codex: {
     label: 'Codex',
@@ -22,7 +22,7 @@ export const WRITING_HOSTS = {
     package: '@openai/codex',
     installUrl: 'https://developers.openai.com/codex/cli',
     appUrl: 'https://developers.openai.com/codex/cli',
-    open: '打开 Codex 并登录。还没安装就按说明安装命令行或应用。',
+    open: '打开写稿窗口会运行 codex login，由它弹出浏览器。这不是发布账号扫码。',
   },
 };
 

@@ -5,12 +5,13 @@ business folder; sync reads it back. A missing CLI still leaves copy-and-sync.
 """
 from __future__ import annotations
 
+import sys
 from datetime import datetime
 from pathlib import Path
 
 from fastapi import HTTPException, Request
 
-from desktop_cli import desktop_cli_location
+from desktop_cli import desktop_cli_location, login_launch_plan, start_login_window
 from review_engine import ZONE
 
 EMPTY_FILE = {'exists': False, 'matchesToday': False, 'writtenToday': False, 'date': ''}
@@ -156,3 +157,24 @@ def attach(app, core):
             raise HTTPException(400, '请选择 WorkBuddy 或 Codex')
         core.put('writing_host', {'id': 'main', 'host': host})
         return snapshot()
+
+    @app.post('/api/writing/host/open')
+    async def writing_host_open(request: Request):
+        try:
+            data = await request.json()
+        except Exception:
+            data = None
+        if not isinstance(data, dict):
+            data = {}
+        host = data.get('host') or chosen() or 'workbuddy'
+        located = desktop_cli_location()
+        info = next((item for item in located['hosts'] if item['id'] == host), None)
+        plan = login_launch_plan(host, (info or {}).get('path') or '', sys.platform)
+        if not plan['opened']:
+            return {'opened': False, 'host': host if host in ('workbuddy', 'codex') else '', 'message': plan['message']}
+        try:
+            start_login_window(plan['argv'])
+        except OSError:
+            manual = 'codebuddy' if host == 'workbuddy' else 'codex login'
+            return {'opened': False, 'host': host, 'message': f'没有弹出终端。请自己打开终端，运行 {manual}。写稿登录和发布账号扫码不是同一件事。'}
+        return {'opened': True, 'host': host, 'message': plan['message']}

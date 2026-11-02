@@ -1,4 +1,5 @@
 import json, os, sys, tempfile, time, unittest
+from unittest.mock import patch
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from fastapi.testclient import TestClient
@@ -46,6 +47,22 @@ class DesktopCliTests(unittest.TestCase):
         found = desktop_cli.desktop_cli_location(which=lambda name: None, home=Path('/no/such/home'), npm_root='')
         self.assertEqual([item['found'] for item in found['hosts']], [False, False])
         self.assertEqual(found['npmError'], '')
+
+    def test_workbuddy_login_opens_a_terminal_and_not_a_platform_qr(self):
+        plan = desktop_cli.login_launch_plan('workbuddy', '/tmp/codebuddy', 'linux')
+        self.assertTrue(plan['opened'])
+        self.assertEqual(plan['argv'][0], 'x-terminal-emulator')
+        self.assertIn('/tmp/codebuddy', plan['argv'][-1])
+        self.assertNotIn('http', ' '.join(plan['argv']))
+        self.assertIn('国内站', plan['message'])
+        self.assertIn('不是', plan['message'])
+        windows = desktop_cli.login_launch_plan('codex', r'C:\codex.cmd', 'win32')
+        self.assertEqual(windows['argv'][:5], ['cmd', '/c', 'start', '写稿登录', 'cmd'])
+        self.assertIn('login', windows['argv'])
+        missing = desktop_cli.login_launch_plan('workbuddy', '', 'darwin')
+        self.assertFalse(missing['opened'])
+        self.assertIn('codebuddy', missing['message'])
+        self.assertIn('发布页', missing['message'])
 
 
 class WritingHostTests(unittest.TestCase):
@@ -154,6 +171,27 @@ class WritingHostTests(unittest.TestCase):
         status = self.client.get('/api/writing/host').json()
         self.assertFalse(status['topicFile']['exists'])
         self.assertFalse(status['ready'])
+
+    def test_open_login_uses_the_planned_terminal_and_does_not_spawn_when_missing(self):
+        calls = []
+
+        def runner(argv, **kwargs):
+            calls.append((argv, kwargs))
+            return type('Proc', (), {'pid': 0})()
+
+        located = {'hosts': [{'id': 'workbuddy', 'path': '/tmp/codebuddy', 'found': True}]}
+        with patch.object(writing_host, 'desktop_cli_location', return_value=located), patch.object(writing_host, 'start_login_window', runner):
+            opened = self.post('/writing/host/open', {'host': 'workbuddy'})
+        self.assertEqual(opened.status_code, 200, opened.text)
+        self.assertTrue(opened.json()['opened'])
+        self.assertIn('国内站', opened.json()['message'])
+        self.assertEqual(calls[0][0][0], 'x-terminal-emulator')
+        self.assertNotIn('argv', opened.json())
+        with patch.object(writing_host, 'desktop_cli_location', return_value={'hosts': [{'id': 'workbuddy', 'path': '', 'found': False}]}), patch.object(writing_host, 'start_login_window', runner):
+            missing = self.post('/writing/host/open', {'host': 'workbuddy'})
+        self.assertFalse(missing.json()['opened'])
+        self.assertEqual(len(calls), 1)
+        self.assertIn('codebuddy', missing.json()['message'])
 
     def test_ready_rule_accepts_sync_or_todays_file(self):
         self.assertFalse(writing_host.writing_ready({'exists': False}, False))

@@ -12,6 +12,12 @@ def prepare():
    archive.extractall(APP,members=[e for e in archive.infolist() if e.filename.startswith(prefix+'/')])
  if len(list((APP/'frozen-skills-v041').glob('*/**/SKILL.md')))!=12:raise ValueError('原版框架未齐备')
  print('12项框架已在当前源码副本展开。')
+ note_publisher_venv()
+def note_publisher_venv():
+ venv=APP/'vendor'/'social-auto-upload'/'.venv'
+ python=venv/('Scripts/python.exe' if os.name=='nt' else 'bin/python')
+ if venv.exists() and not python.is_file():
+  print('发布器环境不完整：social-auto-upload/.venv 在，但没有 Python。prepare 不联网安装。请执行 python scripts/install_optional.py publish，它会删掉坏环境再重建，不会登录或发布。', flush=True)
 def main():
  parser=argparse.ArgumentParser();parser.add_argument('action',choices=['prepare','test','serve']);parser.add_argument('--port',type=int,default=8766);a=parser.parse_args()
  prepare()

@@ -9,6 +9,8 @@ test('writing wizard is four steps and either host is enough', () => {
   assert.equal(WRITING_HOSTS.workbuddy.command, 'codebuddy');
   assert.equal(WRITING_HOSTS.codex.package, '@openai/codex');
   assert.equal(WRITING_HOSTS.codex.command, 'codex');
+  assert.match(WRITING_HOSTS.workbuddy.open, /不是发布账号扫码/);
+  assert.match(WRITING_HOSTS.codex.open, /不是发布账号扫码/);
   assert.match(WRITING_HOSTS.workbuddy.installUrl, /^https:\/\/www\.codebuddy\.cn\/docs\/cli\/installation/);
   assert.match(WRITING_HOSTS.codex.installUrl, /^https:\/\/developers\.openai\.com\/codex\/cli/);
   assert.equal(stepCanAdvance('host', {host: ''}), false);
