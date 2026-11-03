@@ -287,9 +287,20 @@ def attach(app,core):
  def prepare_delivery(ident:str):
   p=core.get('project',ident)
   if not output_ready(p):raise HTTPException(409,'先上传一份剪辑好的成片，或检查视频文件是否改变')
+  from semantic_delivery import local_path_ready,prepare,AsrUnavailable
+  from publish_understanding import write_handoff
+  def handoff(reason):
+   try:return write_handoff(core,ident,reason)
+   except ValueError as e:raise HTTPException(400,str(e)) from None
+  try:ready,reason=local_path_ready(core,p)
+  except ValueError as e:raise HTTPException(400,str(e)) from None
+  if not ready:return handoff(reason)
   def work(job):
-   from semantic_delivery import prepare
-   return prepare(core,ident)
+   try:return prepare(core,ident)
+   except AsrUnavailable:return handoff('asr')
+   except ValueError as e:
+    if '还没接通' in str(e) or '自动写作' in str(e):return handoff('model')
+    raise
   return core.job('理解视频并准备两平台发布信息',ident,work)
  @app.on_event('startup')
  def start_clock():

@@ -19,7 +19,7 @@ class LearnerFlowTests(unittest.TestCase):
   src=APP/'src'
   main=(src/'main.jsx').read_text(encoding='utf-8')
   daily=(src/'DailyHome.jsx').read_text(encoding='utf-8')
-  publish=(src/'PublishingPage.jsx').read_text(encoding='utf-8')
+  publish=(src/'PublishingPage.jsx').read_text(encoding='utf-8')+(src/'PublishUnderstanding.jsx').read_text(encoding='utf-8')
   review=(src/'ReviewBoard.jsx').read_text(encoding='utf-8')
   methods=(src/'MethodHome.jsx').read_text(encoding='utf-8')
   path=(src/'LearnerPath.jsx').read_text(encoding='utf-8')
